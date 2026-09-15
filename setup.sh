@@ -54,12 +54,16 @@ if ! rpm -q rpmfusion-nonfree-release >/dev/null 2>&1; then
         https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
 fi
 
-#Flatpak
+# Flatpak
 sudo dnf install -y flatpak
 sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
+# Copr
+sudo dnf copr enable -y avengemedia/dms
+
 log "Installing script dependencies"
 sudo dnf install -y \
+    @development-tools \
     git \
     curl \
     wget \
@@ -71,10 +75,49 @@ sudo dnf install -y \
     pkg-config \
     openssl \
     openssl-devel \
-    shellcheck 
+    shellcheck \
+    kitty \
+    neovim \
+    fish \
+    chromium \
+    niri \
+    dms
 
-log "Installing development tools"
-sudo dnf -y install @development-tools
+systemctl --user add-wants niri.service dms
+
+log "Installing multimedia codecs"
+sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
+sudo dnf group upgrade -y multimedia --setopt=install_weak_deps=false --exclude=PackageKit-gstreamer-plugin
+
+log "Installing CLI tools"
+# mise
+if ! command -v mise >/dev/null 2>&1; then
+    curl https://mise.run | sh
+fi
+
+# CLI
+~/.local/bin/mise use -g ripgrep@latest
+~/.local/bin/mise use -g fzf@latest
+~/.local/bin/mise use -g fd@latest
+~/.local/bin/mise use -g chezmoi@latest
+
+# JS
+~/.local/bin/mise use -g node@lts
+~/.local/bin/mise use -g yarn@latest
+~/.local/bin/mise use -g pnpm@latest
+~/.local/bin/mise use -g bun@latest
+~/.local/bin/mise use -g nub@latest
+
+# OTHER
+~/.local/bin/mise use -g go@latest
+~/.local/bin/mise use -g rust@stable
+~/.local/bin/mise use -g odin@latest
+
+log "Installing desktop tools"
+flatpak install -y --noninteractive flathub \
+    org.mozilla.thunderbird \
+    com.bitwarden.desktop \
+    com.brave.Browser
 
 log "Generating ssh keys"
 FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
@@ -198,51 +241,11 @@ upload_ssh_key() {
 upload_ssh_key "$HOME/.ssh/github.pub" "$HOST_TAG-github" "authentication"
 upload_ssh_key "$HOME/.ssh/skey.pub" "$HOST_TAG-signing" "signing"
 
-log "Installing desktop tools"
-sudo dnf install -y \
-    kitty \
-    neovim \
-    fish \
-    chromium
-flatpak install -y --noninteractive flathub \
-    org.mozilla.thunderbird \
-    com.bitwarden.desktop \
-    com.brave.Browser
-
-
-log "Installing CLI tools"
-# mise
-if ! command -v mise >/dev/null 2>&1; then
-    curl https://mise.run | sh
-fi
-
-# CLI
-~/.local/bin/mise use -g ripgrep@latest
-~/.local/bin/mise use -g fzf@latest
-~/.local/bin/mise use -g fd@latest
-~/.local/bin/mise use -g chezmoi@latest
-
-# JS
-~/.local/bin/mise use -g node@lts
-~/.local/bin/mise use -g yarn@latest
-~/.local/bin/mise use -g pnpm@latest
-~/.local/bin/mise use -g bun@latest
-~/.local/bin/mise use -g nub@latest
-
-# OTHER
-~/.local/bin/mise use -g go@latest
-~/.local/bin/mise use -g rust@stable
-~/.local/bin/mise use -g odin@latest
-
 log "Cloning dotfiles"
 if ! ~/.local/bin/mise exec chezmoi@latest -- chezmoi init --apply "git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"; then
     echo "Warning: Failed to clone/apply dotfiles from git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"
     echo "Verify the repository exists and your SSH key is authorized."
 fi
-
-log "Installing multimedia codecs"
-sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
-sudo dnf group upgrade -y multimedia --setopt=install_weak_deps=false --exclude=PackageKit-gstreamer-plugin
 
 log "Setup gaming"
 sudo dnf install -y steam
@@ -255,10 +258,35 @@ flatpak install -y --noninteractive flathub \
     com.vysp3r.ProtonPlus \
     com.github.Matoking.protontricks
 
-log "Setup Niri and DMS"
-sudo dnf copr enable -y avengemedia/dms
-sudo dnf install -y niri dms
-systemctl --user add-wants niri.service dms
+# 1. Detect if an NVIDIA GPU is present in the machine
+if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
+    echo "✅ NVIDIA GPU detected."
+    
+    # 2. Check if the driver is already installed
+    if rpm -q akmod-nvidia &> /dev/null; then
+        echo "ℹ️ NVIDIA drivers (akmod-nvidia) are already installed."
+        exit 0
+    fi
+
+    # 3. Enable the specific NVIDIA driver repository profile
+    sudo dnf config-manager --set-enabled rpmfusion-nonfree-nvidia-driver
+
+    echo "==> Updating package cache..."
+    sudo dnf makecache
+
+    echo "==> Installing NVIDIA proprietary drivers and CUDA..."
+    # 5. Install the core driver package and CUDA utilities safely
+    sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
+
+    echo "================================================================"
+    echo "🎉 Installation complete!"
+    echo "⚠️  IMPORTANT: Please wait 3-5 minutes BEFORE rebooting."
+    echo "    Fedora is building the kernel module (akmods) in the background."
+    echo "================================================================"
+else
+    echo "❌ No NVIDIA GPU detected on this system. Skipping driver setup."
+    exit 0
+fi
 
 log "Done"
 
