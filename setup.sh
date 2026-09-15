@@ -146,6 +146,7 @@ log "Starting SSH Agent and adding keys"
 eval "$(ssh-agent -s)" >/dev/null
 
 if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
+    log "Creating temporary script"
     askpass="$(mktemp)"
     chmod 700 "$askpass"
 
