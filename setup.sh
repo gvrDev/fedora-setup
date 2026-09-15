@@ -290,7 +290,7 @@ if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
 
     echo "==> Installing NVIDIA proprietary drivers and CUDA..."
     # 5. Install the core driver package and CUDA utilities safely
-    sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-libs.i686 libva-nvidia-driver libva-utils
+    sudo dnf install -y akmod-nvidia-open xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-libs.i686 libva-nvidia-driver libva-utils
     sudo systemctl enable nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service
     sudo akmods --force
     sudo dracut --force
