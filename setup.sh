@@ -171,7 +171,7 @@ sudo dnf install -y \
     neovim \
     fish \
     chromium
-flatpak install -y --noninteractive --user flathub \
+flatpak install -y --noninteractive flathub \
     org.mozilla.thunderbird \
     com.bitwarden.desktop \
     com.brave.Browser
@@ -213,7 +213,7 @@ sudo dnf group upgrade -y multimedia --setop="install_weak_deps=False" --exclude
 
 log "Setup gaming"
 sudo dnf install -y steam
-flatpak install -y --noninteractive --user flathub \
+flatpak install -y --noninteractive flathub \
     com.heroicgameslauncher.hgl \
     com.discordapp.Discord \
     com.usebottles.bottles \
