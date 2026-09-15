@@ -77,7 +77,7 @@ sudo dnf install -y \
     shellcheck 
 
 log "Installing development tools"
-sudo dnf install @development-tools
+sudo dnf install -y @development-tools
 
 log "Generating ssh keys"
 FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
