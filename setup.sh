@@ -82,6 +82,9 @@ sudo dnf install -y \
     openssl \
     openssl-devel \
     shellcheck \
+    podman \
+    podman-machine \
+    podman-compose \
     fastfetch \
     wezterm \
     neovim \
