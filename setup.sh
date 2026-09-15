@@ -43,7 +43,7 @@ sudo dnf upgrade -y
 
 log "Installing repositories"
 # RPM Fusion
-sudo dnf config-manager setopt fedora-cisco-openh264.enabled=1
+sudo dnf config-manager --set-enabled fedora-cisco-openh264
 if ! rpm -q rpmfusion-free-release >/dev/null 2>&1; then
     sudo dnf install -y \
         https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
@@ -65,6 +65,13 @@ sudo dnf copr enable -y wezfurlong/wezterm-nightly
 log "Installing script dependencies"
 sudo dnf install -y \
     @development-tools \
+    pciutils \
+    wl-clipboard \
+    polkit-gnome \
+    xdg-desktop-portal-gnome \
+    brightnessctl \
+    playerctl \
+    wireplumber \
     git \
     curl \
     wget \
@@ -76,6 +83,7 @@ sudo dnf install -y \
     openssl \
     openssl-devel \
     shellcheck \
+    fastfetch \
     wezterm \
     neovim \
     fish \
@@ -272,7 +280,6 @@ if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
     # 2. Check if the driver is already installed
     if rpm -q akmod-nvidia &> /dev/null; then
         echo "ℹ️ NVIDIA drivers (akmod-nvidia) are already installed."
-        exit 0
     fi
 
     # 3. Enable the specific NVIDIA driver repository profile
@@ -283,12 +290,15 @@ if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
 
     echo "==> Installing NVIDIA proprietary drivers and CUDA..."
     # 5. Install the core driver package and CUDA utilities safely
-    sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
+    sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-libs.i686 libva-nvidia-driver libva-utils
+    sudo systemctl enable nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service
+    sudo akmods --force
+    sudo dracut --force
 
     echo "================================================================"
     echo "🎉 Installation complete!"
-    echo "⚠️  IMPORTANT: Please wait 3-5 minutes BEFORE rebooting."
-    echo "    Fedora is building the kernel module (akmods) in the background."
+    echo "⚠️  IMPORTANT: Please reboot your system to apply changes."
+    echo "    Command: sudo reboot"
     echo "================================================================"
 else
     echo "❌ No NVIDIA GPU detected on this system. Skipping driver setup."
