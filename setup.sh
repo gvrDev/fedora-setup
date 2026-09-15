@@ -43,7 +43,7 @@ sudo dnf upgrade -y
 
 log "Installing repositories"
 # RPM Fusion
-sudo dnf config-manager --set-enabled fedora-cisco-openh264
+sudo dnf config-manager setopt fedora-cisco-openh264.enabled=1
 if ! rpm -q rpmfusion-free-release >/dev/null 2>&1; then
     sudo dnf install -y \
         https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
@@ -283,7 +283,7 @@ if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
     fi
 
     # 3. Enable the specific NVIDIA driver repository profile
-    sudo dnf config-manager --set-enabled rpmfusion-nonfree-nvidia-driver
+    sudo dnf config-manager setopt rpmfusion-nonfree-nvidia-driver.enabled=1
 
     echo "==> Updating package cache..."
     sudo dnf makecache
