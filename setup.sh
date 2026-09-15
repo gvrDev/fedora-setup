@@ -107,6 +107,7 @@ Host github.com
     IdentityFile ~/.ssh/github
     IdentitiesOnly yes
     AddKeysToAgent yes
+    StrictHostKeyChecking accept-new
 EOF
 fi
 
