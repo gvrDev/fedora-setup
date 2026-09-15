@@ -242,7 +242,7 @@ fi
 
 log "Installing multimedia codecs"
 sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
-sudo dnf group upgrade -y multimedia --setop="install_weak_deps=False" --exclude=PackageKit-gstreamer-plugin
+sudo dnf group upgrade -y multimedia --setopt=install_weak_deps=false --exclude=PackageKit-gstreamer-plugin
 
 log "Setup gaming"
 sudo dnf install -y steam
