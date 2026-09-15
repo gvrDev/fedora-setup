@@ -146,11 +146,11 @@ log "Starting SSH Agent and adding keys"
 eval "$(ssh-agent -s)" >/dev/null
 
 if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
-    log "Creating temporary script"
     askpass="$(mktemp)"
     chmod 700 "$askpass"
 
-    cat >"$askpass" <<'EOF'
+    # Unquote EOF so the passphrase value is written directly into the file
+    cat >"$askpass" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "$FEDORA_SCRIPT_SSH_PASSPHRASE"
 EOF
@@ -160,15 +160,15 @@ EOF
     SSH_ASKPASS="$askpass" \
     SSH_ASKPASS_REQUIRE=force \
     DISPLAY=:0 \
-        ssh-add "$HOME/.ssh/github" >/dev/null 2>&1 || true
+        ssh-add "$HOME/.ssh/github"
 
     SSH_ASKPASS="$askpass" \
     SSH_ASKPASS_REQUIRE=force \
     DISPLAY=:0 \
-        ssh-add "$HOME/.ssh/skey" >/dev/null 2>&1 || true
+        ssh-add "$HOME/.ssh/skey"
 else
-    ssh-add "$HOME/.ssh/github" >/dev/null 2>&1 || true
-    ssh-add "$HOME/.ssh/skey" >/dev/null 2>&1 || true
+    ssh-add "$HOME/.ssh/github"
+    ssh-add "$HOME/.ssh/skey"
 fi
 
 log "Authenticating GitHub"
