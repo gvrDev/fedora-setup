@@ -142,6 +142,7 @@ sudo dnf install -y gh
 if ! gh auth status &>/dev/null; then
     gh auth login --web --skip-ssh-key --git-protocol ssh --hostname github.com --clipboard
 fi
+gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key
 
 log "Uploading GitHub SSH key"
 HOST_TAG="${HOSTNAME:-$(uname -n)}"
