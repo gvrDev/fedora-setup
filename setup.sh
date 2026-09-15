@@ -89,7 +89,7 @@ sudo dnf install -y \
     wezterm \
     neovim \
     fish \
-    chromium \
+    firefox \
     niri \
     dms
 
