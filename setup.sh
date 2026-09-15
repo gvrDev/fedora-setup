@@ -141,14 +141,21 @@ git config --global gpg.format ssh
 git config --global user.signingkey "$HOME/.ssh/skey.pub"
 git config --global commit.gpgsign true
 
-log "Starting SSH Agent and adding key"
+log "Loading SSH keys into agent"
 eval "$(ssh-agent -s)" >/dev/null
 
 if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
-    SSH_ASKPASS_REQUIRE=never DISPLAY="" SSH_ASKPASS="" \
-        echo "$FEDORA_SCRIPT_SSH_PASSPHRASE" | ssh-add "$HOME/.ssh/github" 2>/dev/null
-    SSH_ASKPASS_REQUIRE=never DISPLAY="" SSH_ASKPASS="" \
-        echo "$FEDORA_SCRIPT_SSH_PASSPHRASE" | ssh-add "$HOME/.ssh/skey" 2>/dev/null
+    ASKPASS_SCRIPT=$(mktemp)
+    cat <<EOF > "$ASKPASS_SCRIPT"
+#!/usr/bin/env bash
+echo "$FEDORA_SCRIPT_SSH_PASSPHRASE"
+EOF
+    chmod +x "$ASKPASS_SCRIPT"
+
+    SSH_ASKPASS="$ASKPASS_SCRIPT" SSH_ASKPASS_REQUIRE=force ssh-add "$HOME/.ssh/github" </dev/null 2>/dev/null
+    SSH_ASKPASS="$ASKPASS_SCRIPT" SSH_ASKPASS_REQUIRE=force ssh-add "$HOME/.ssh/skey" </dev/null 2>/dev/null
+
+    rm -f "$ASKPASS_SCRIPT"
 else
     ssh-add "$HOME/.ssh/github" 2>/dev/null
     ssh-add "$HOME/.ssh/skey" 2>/dev/null
