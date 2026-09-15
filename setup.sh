@@ -140,7 +140,7 @@ git config --global commit.gpgsign true
 log "Authenticating GitHub"
 sudo dnf install -y gh
 if ! gh auth status &>/dev/null; then
-    gh auth login --web --skip-ssh-key --git-protocol ssh --hostname github.com
+    gh auth login --web --skip-ssh-key --git-protocol ssh --hostname github.com --clipboard
 fi
 
 log "Uploading GitHub SSH key"
