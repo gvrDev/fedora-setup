@@ -98,6 +98,12 @@ chmod 700 "$HOME/.ssh"
 touch "$HOME/.ssh/config"
 chmod 600 "$HOME/.ssh/config"
 
+# Pre-seed GitHub host keys to prevent interactive host verification prompts
+if ! ssh-keygen -F github.com >/dev/null 2>&1; then
+    ssh-keyscan -t ed25519,rsa github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+    chmod 600 "$HOME/.ssh/known_hosts"
+fi
+
 if ! grep -q "Host github.com" "$HOME/.ssh/config"; then
     cat >> "$HOME/.ssh/config" <<EOF
 
@@ -128,6 +134,19 @@ generate_ssh_key() {
 
 generate_ssh_key "$HOME/.ssh/github"
 generate_ssh_key "$HOME/.ssh/skey"
+
+log "Starting SSH Agent and adding key"
+eval "$(ssh-agent -s)" >/dev/null
+
+if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
+    SSH_ASKPASS_REQUIRE=never DISPLAY="" SSH_ASKPASS="" \
+        echo "$FEDORA_SCRIPT_SSH_PASSPHRASE" | ssh-add "$HOME/.ssh/github" 2>/dev/null
+    SSH_ASKPASS_REQUIRE=never DISPLAY="" SSH_ASKPASS="" \
+        echo "$FEDORA_SCRIPT_SSH_PASSPHRASE" | ssh-add "$HOME/.ssh/skey" 2>/dev/null
+else
+    ssh-add "$HOME/.ssh/github" 2>/dev/null
+    ssh-add "$HOME/.ssh/skey" 2>/dev/null
+fi
 
 git config --global user.name "$FEDORA_SCRIPT_GIT_NAME"
 git config --global user.email "$FEDORA_SCRIPT_SSH_EMAIL"
