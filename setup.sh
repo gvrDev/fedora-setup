@@ -23,6 +23,21 @@ done 2>/dev/null &
 SUDO_KEEPALIVE_PID=$!
 trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT INT TERM
 
+log "Configuring DNF"
+DNF_CONF="/etc/dnf/dnf.conf"
+if [[ ! -f "$DNF_CONF" ]]; then
+    sudo mkdir -p "$(dirname "$DNF_CONF")"
+    printf '[main]\nmax_parallel_downloads=10\n' | sudo tee "$DNF_CONF" >/dev/null
+elif grep -qE '^[[:space:]]*max_parallel_downloads[[:space:]]*=[[:space:]]*10([[:space:]]*$|[[:space:]]+#)' "$DNF_CONF"; then
+    : # Already configured
+elif grep -qE '^[[:space:]]*max_parallel_downloads[[:space:]]*=' "$DNF_CONF"; then
+    sudo sed -i --follow-symlinks -E 's/^[[:space:]]*max_parallel_downloads[[:space:]]*=.*/max_parallel_downloads=10/' "$DNF_CONF"
+elif grep -qE '^[[:space:]]*\[main\]' "$DNF_CONF"; then
+    sudo sed -i --follow-symlinks -E '/^[[:space:]]*\[main\]/a max_parallel_downloads=10' "$DNF_CONF"
+else
+    printf '\n[main]\nmax_parallel_downloads=10\n' | sudo tee -a "$DNF_CONF" >/dev/null
+fi
+
 log "Updating Fedora"
 sudo dnf upgrade -y
 
@@ -62,7 +77,7 @@ sudo dnf install -y \
     shellcheck 
 
 log "Installing development tools"
-sudo dnf group install -y "Development Tools"
+sudo dnf install @development-tools
 
 log "Generating ssh keys"
 FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
