@@ -60,6 +60,7 @@ sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flat
 
 # Copr
 sudo dnf copr enable -y avengemedia/dms
+sudo dnf copr enable -y wezfurlong/wezterm-nightly
 
 log "Installing script dependencies"
 sudo dnf install -y \
@@ -69,14 +70,13 @@ sudo dnf install -y \
     wget \
     unzip \
     zip \
-    jq \
     cmake \
     ninja-build \
     pkg-config \
     openssl \
     openssl-devel \
     shellcheck \
-    kitty \
+    wezterm \
     neovim \
     fish \
     chromium \
@@ -100,6 +100,13 @@ fi
 ~/.local/bin/mise use -g fzf@latest
 ~/.local/bin/mise use -g fd@latest
 ~/.local/bin/mise use -g chezmoi@latest
+~/.local/bin/mise use -g jq@latest
+
+# TUI
+~/.local/bin/mise use -g lazygit@latest
+~/.local/bin/mise use -g opencode@latest
+~/.local/bin/mise use -g github:can1357/oh-my-pi
+~/.local/bin/mise use -g cargo:raine/workmux
 
 # JS
 ~/.local/bin/mise use -g node@lts
@@ -285,7 +292,6 @@ if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
     echo "================================================================"
 else
     echo "❌ No NVIDIA GPU detected on this system. Skipping driver setup."
-    exit 0
 fi
 
 log "Done"
