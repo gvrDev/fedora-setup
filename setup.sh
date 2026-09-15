@@ -113,7 +113,6 @@ fi
 ~/.local/bin/mise use -g lazygit@latest
 ~/.local/bin/mise use -g opencode@latest
 ~/.local/bin/mise use -g github:can1357/oh-my-pi
-~/.local/bin/mise use -g cargo:raine/workmux
 
 # JS
 ~/.local/bin/mise use -g node@lts
