@@ -135,6 +135,12 @@ generate_ssh_key() {
 generate_ssh_key "$HOME/.ssh/github"
 generate_ssh_key "$HOME/.ssh/skey"
 
+git config --global user.name "$FEDORA_SCRIPT_GIT_NAME"
+git config --global user.email "$FEDORA_SCRIPT_SSH_EMAIL"
+git config --global gpg.format ssh
+git config --global user.signingkey "$HOME/.ssh/skey.pub"
+git config --global commit.gpgsign true
+
 log "Starting SSH Agent and adding key"
 eval "$(ssh-agent -s)" >/dev/null
 
@@ -147,12 +153,6 @@ else
     ssh-add "$HOME/.ssh/github" 2>/dev/null
     ssh-add "$HOME/.ssh/skey" 2>/dev/null
 fi
-
-git config --global user.name "$FEDORA_SCRIPT_GIT_NAME"
-git config --global user.email "$FEDORA_SCRIPT_SSH_EMAIL"
-git config --global gpg.format ssh
-git config --global user.signingkey "$HOME/.ssh/skey.pub"
-git config --global commit.gpgsign true
 
 log "Authenticating GitHub"
 sudo dnf install -y gh
