@@ -256,7 +256,7 @@ flatpak install -y --noninteractive flathub \
     com.github.Matoking.protontricks
 
 log "Setup Niri and DMS"
-sudo dnf copr enable avengemedia/dms
+sudo dnf copr enable -y avengemedia/dms
 sudo dnf install -y niri dms
 systemctl --user add-wants niri.service dms
 
