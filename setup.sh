@@ -56,10 +56,7 @@ fi
 
 #Flatpak
 sudo dnf install -y flatpak
-if ! flatpak remote-list | grep -q '^flathub'; then
-    flatpak remote-add --if-not-exists \
-        flathub https://flathub.org/repo/flathub.flatpakrepo
-fi
+sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 log "Installing script dependencies"
 sudo dnf install -y \
@@ -139,10 +136,9 @@ git config --global commit.gpgsign true
 
 log "Authenticating GitHub"
 sudo dnf install -y gh
-if ! gh auth status &>/dev/null; then
-    gh auth login --web --skip-ssh-key --git-protocol ssh --hostname github.com --clipboard
+if ! gh auth status 2>&1 | grep -qE "admin:public_key|admin:ssh_signing_key"; then
+    gh auth login --web --skip-ssh-key --git-protocol ssh --hostname github.com --clipboard -s admin:public_key,admin:ssh_signing_key
 fi
-gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key
 
 log "Uploading GitHub SSH key"
 HOST_TAG="${HOSTNAME:-$(uname -n)}"
