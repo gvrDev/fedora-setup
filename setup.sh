@@ -67,7 +67,6 @@ sudo dnf install -y \
     @development-tools \
     pciutils \
     wl-clipboard \
-    polkit-gnome \
     xdg-desktop-portal-gnome \
     brightnessctl \
     playerctl \
