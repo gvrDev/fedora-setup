@@ -102,6 +102,18 @@ if ! command -v mise >/dev/null 2>&1; then
     curl https://mise.run | sh
 fi
 
+# BASE
+~/.local/bin/mise use -g go@latest
+~/.local/bin/mise use -g rust@stable
+~/.local/bin/mise use -g odin@latest
+
+# JS
+~/.local/bin/mise use -g node@lts
+~/.local/bin/mise use -g yarn@latest
+~/.local/bin/mise use -g pnpm@latest
+~/.local/bin/mise use -g bun@latest
+~/.local/bin/mise use -g nub@latest
+
 # CLI
 ~/.local/bin/mise use -g ripgrep@latest
 ~/.local/bin/mise use -g fzf@latest
@@ -113,18 +125,8 @@ fi
 ~/.local/bin/mise use -g lazygit@latest
 ~/.local/bin/mise use -g opencode@latest
 ~/.local/bin/mise use -g github:can1357/oh-my-pi
+~/.local/bin/mise use -g cargo:raine/workmux
 
-# JS
-~/.local/bin/mise use -g node@lts
-~/.local/bin/mise use -g yarn@latest
-~/.local/bin/mise use -g pnpm@latest
-~/.local/bin/mise use -g bun@latest
-~/.local/bin/mise use -g nub@latest
-
-# OTHER
-~/.local/bin/mise use -g go@latest
-~/.local/bin/mise use -g rust@stable
-~/.local/bin/mise use -g odin@latest
 
 log "Installing desktop tools"
 flatpak install -y --noninteractive flathub \
