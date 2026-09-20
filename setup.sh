@@ -307,7 +307,7 @@ sudo tee /etc/greetd/config.toml >/dev/null <<EOF
 vt = 1
 
 [initial_session]
-command = "niri-session"
+command = "niri-session 2>/dev/null"
 user = "$ACTUAL_USER"
 
 [default_session]
