@@ -74,14 +74,24 @@ sudo dnf install -y \
     git \
     curl \
     wget \
+    tar \
+    gzip \
+    bzip2 \
+    xz \
     unzip \
     zip \
+    procs \
+    fuse \
+    fuse-libs \
+    fuse3 \
+    lsof \
+    tree \
     cmake \
     ninja-build \
     pkg-config \
     openssl \
     openssl-devel \
-    shellcheck \
+    ca-certificates \
     podman \
     podman-machine \
     podman-compose \
@@ -109,6 +119,7 @@ fi
 ~/.local/bin/mise use -g go@latest
 ~/.local/bin/mise use -g rust@stable
 ~/.local/bin/mise use -g odin@latest
+~/.local/bin/mise use -g postgres@latest
 
 # JS
 ~/.local/bin/mise use -g node@lts
@@ -119,10 +130,24 @@ fi
 
 # CLI
 ~/.local/bin/mise use -g ripgrep@latest
+~/.local/bin/mise use -g ast-grep@latest
 ~/.local/bin/mise use -g fzf@latest
 ~/.local/bin/mise use -g fd@latest
 ~/.local/bin/mise use -g chezmoi@latest
+~/.local/bin/mise use -g just@latest
 ~/.local/bin/mise use -g jq@latest
+~/.local/bin/mise use -g yq@latest
+~/.local/bin/mise use -g mongosh@latest
+~/.local/bin/mise use -g shellcheck@latest
+~/.local/bin/mise use -g semgrep@latest
+~/.local/bin/mise use -g betterleaks@latest
+~/.local/bin/mise use -g hyperfine@latest
+~/.local/bin/mise use -g eza@latest
+~/.local/bin/mise use -g bat@latest
+~/.local/bin/mise use -g zoxide@latest
+~/.local/bin/mise use -g duf@latest
+~/.local/bin/mise use -g dust@latest
+~/.local/bin/mise use -g bottom@latest
 
 # TUI
 ~/.local/bin/mise use -g lazygit@latest
@@ -150,7 +175,7 @@ if [[ -z "${FEDORA_SCRIPT_SSH_EMAIL:-}" ]]; then
     read -rp "SSH & Git email: " FEDORA_SCRIPT_SSH_EMAIL
 fi
 if [[ -z "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
-    read -rsp "SSH key passphrase (empty for none): " FEDORA_SCRIPT_SSH_PASSPHRASE
+    read -rsp "SSH key passphrase : " FEDORA_SCRIPT_SSH_PASSPHRASE
     echo
 fi
 
@@ -281,8 +306,10 @@ if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
     echo "✅ NVIDIA GPU detected."
     
     # 2. Check if the driver is already installed
-    if rpm -q akmod-nvidia &> /dev/null; then
-        echo "ℹ️ NVIDIA drivers (akmod-nvidia) are already installed."
+    if rpm -q akmod-nvidia-open &>/dev/null; then
+        echo "NVIDIA open kernel module is already installed."
+    elif rpm -q akmod-nvidia &>/dev/null; then
+        echo "NVIDIA proprietary kernel module is already installed."
     fi
 
     # 3. Enable the specific NVIDIA driver repository profile
