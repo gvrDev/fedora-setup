@@ -23,6 +23,49 @@ done 2>/dev/null &
 SUDO_KEEPALIVE_PID=$!
 trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT INT TERM
 
+PACKAGES=(
+    @development-tools
+    pciutils
+    wl-clipboard
+    xdg-desktop-portal-gnome
+    brightnessctl
+    playerctl
+    wireplumber
+    git
+    curl
+    wget
+    tar
+    gzip
+    bzip2
+    xz
+    unzip
+    zip
+    procs
+    fuse
+    fuse-libs
+    fuse3
+    lsof
+    tree
+    cmake
+    ninja-build
+    pkg-config
+    openssl
+    openssl-devel
+    ca-certificates
+    podman
+    podman-machine
+    podman-compose
+    fastfetch
+    wezterm
+    fish
+    chromium
+    niri
+    dms
+    gh
+    steam
+    flatpak
+)
+
 log "Configuring DNF"
 DNF_CONF="/etc/dnf/dnf.conf"
 if [[ ! -f "$DNF_CONF" ]]; then
@@ -41,8 +84,7 @@ fi
 log "Updating Fedora"
 sudo dnf upgrade -y
 
-log "Installing repositories"
-# RPM Fusion
+log "Installing RPM fusion"
 sudo dnf config-manager setopt fedora-cisco-openh264.enabled=1
 if ! rpm -q rpmfusion-free-release >/dev/null 2>&1; then
     sudo dnf install -y \
@@ -54,59 +96,33 @@ if ! rpm -q rpmfusion-nonfree-release >/dev/null 2>&1; then
         https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
 fi
 
-# Flatpak
-sudo dnf install -y flatpak
-sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-# Copr
+log "Installing COPR repositories"
 sudo dnf copr enable -y avengemedia/dms
 sudo dnf copr enable -y wezfurlong/wezterm-nightly
 
-log "Installing script dependencies"
-sudo dnf install -y \
-    @development-tools \
-    pciutils \
-    wl-clipboard \
-    xdg-desktop-portal-gnome \
-    brightnessctl \
-    playerctl \
-    wireplumber \
-    git \
-    curl \
-    wget \
-    tar \
-    gzip \
-    bzip2 \
-    xz \
-    unzip \
-    zip \
-    procs \
-    fuse \
-    fuse-libs \
-    fuse3 \
-    lsof \
-    tree \
-    cmake \
-    ninja-build \
-    pkg-config \
-    openssl \
-    openssl-devel \
-    ca-certificates \
-    podman \
-    podman-machine \
-    podman-compose \
-    fastfetch \
-    wezterm \
-    fish \
-    chromium \
-    niri \
-    dms
+if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
+    echo "✅ NVIDIA GPU detected."
+    sudo dnf config-manager setopt rpmfusion-nonfree-nvidia-driver.enabled=1
+    PACKAGES+=(
+        akmod-nvidia-open
+        xorg-x11-drv-nvidia-cuda
+        xorg-x11-drv-nvidia-libs.i686
+        libva-nvidia-driver
+        libva-utils
+    )
+else
+    echo "❌ No NVIDIA GPU detected on this system. Skipping driver setup."
+fi
 
+log "Creating repositories cache"
+sudo dnf makecache
+
+log "Installing dnf packages"
+sudo dnf install -y "${PACKAGES[@]}"
 sudo dnf install -y --setopt=install_weak_deps=false \
     neovim \
     tree-sitter-cli
-
-systemctl --user add-wants niri.service dms
 
 log "Installing multimedia codecs"
 sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
@@ -115,7 +131,15 @@ sudo dnf group upgrade -y multimedia \
     --exclude=PackageKit-gstreamer-plugin,libheif-freeworld \
     --allowerasing
 
-log "Installing CLI tools"
+log "Post install (dnf packages)"
+systemctl --user add-wants niri.service dms
+if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
+    sudo systemctl enable nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service
+    sudo akmods --force
+    sudo dracut --force
+fi
+
+log "Installing MISE and tools"
 # mise
 if ! command -v mise >/dev/null 2>&1; then
     curl https://mise.run | sh
@@ -161,12 +185,19 @@ fi
 ~/.local/bin/mise use -g github:can1357/oh-my-pi
 ~/.local/bin/mise use -g cargo:raine/workmux
 
-
-log "Installing desktop tools"
+log "Installing flatpak apps"
+sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install -y --noninteractive flathub \
     org.mozilla.thunderbird \
     com.bitwarden.desktop \
-    com.brave.Browser
+    com.brave.Browser \
+    com.heroicgameslauncher.hgl \
+    com.discordapp.Discord \
+    com.usebottles.bottles \
+    com.github.tchx84.Flatseal \
+    it.mijorus.gearlever \
+    com.vysp3r.ProtonPlus \
+    com.github.Matoking.protontricks
 
 log "Generating ssh keys"
 FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
@@ -294,50 +325,6 @@ log "Cloning dotfiles"
 if ! ~/.local/bin/mise exec chezmoi@latest -- chezmoi init --apply "git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"; then
     echo "Warning: Failed to clone/apply dotfiles from git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"
     echo "Verify the repository exists and your SSH key is authorized."
-fi
-
-log "Setup gaming"
-sudo dnf install -y steam
-flatpak install -y --noninteractive flathub \
-    com.heroicgameslauncher.hgl \
-    com.discordapp.Discord \
-    com.usebottles.bottles \
-    com.github.tchx84.Flatseal \
-    it.mijorus.gearlever \
-    com.vysp3r.ProtonPlus \
-    com.github.Matoking.protontricks
-
-# 1. Detect if an NVIDIA GPU is present in the machine
-if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
-    echo "✅ NVIDIA GPU detected."
-    
-    # 2. Check if the driver is already installed
-    if rpm -q akmod-nvidia-open &>/dev/null; then
-        echo "NVIDIA open kernel module is already installed."
-    elif rpm -q akmod-nvidia &>/dev/null; then
-        echo "NVIDIA proprietary kernel module is already installed."
-    fi
-
-    # 3. Enable the specific NVIDIA driver repository profile
-    sudo dnf config-manager setopt rpmfusion-nonfree-nvidia-driver.enabled=1
-
-    echo "==> Updating package cache..."
-    sudo dnf makecache
-
-    echo "==> Installing NVIDIA proprietary drivers and CUDA..."
-    # 5. Install the core driver package and CUDA utilities safely
-    sudo dnf install -y akmod-nvidia-open xorg-x11-drv-nvidia-cuda xorg-x11-drv-nvidia-libs.i686 libva-nvidia-driver libva-utils
-    sudo systemctl enable nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service
-    sudo akmods --force
-    sudo dracut --force
-
-    echo "================================================================"
-    echo "🎉 Installation complete!"
-    echo "⚠️  IMPORTANT: Please reboot your system to apply changes."
-    echo "    Command: sudo reboot"
-    echo "================================================================"
-else
-    echo "❌ No NVIDIA GPU detected on this system. Skipping driver setup."
 fi
 
 log "Done"
