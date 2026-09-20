@@ -97,11 +97,14 @@ sudo dnf install -y \
     podman-compose \
     fastfetch \
     wezterm \
-    neovim \
     fish \
-    firefox \
+    chromium \
     niri \
     dms
+
+sudo dnf install -y --setopt=install_weak_deps=false \
+    neovim \
+    tree-sitter-cli
 
 systemctl --user add-wants niri.service dms
 
