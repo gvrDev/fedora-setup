@@ -1,15 +1,130 @@
 #!/usr/bin/env bash
+# ==============================================================================
+# Fedora Workstation Automated Setup
+# ==============================================================================
+# Single-file installer for Fedora Workstation.
+#
+# Flags (Environment variables or CLI arguments):
+#   DEVELOPMENT=1 | --dev | --development   Install developer toolchains & config
+#   GAMING=1      | --gaming                Install Steam & gaming flatpaks
+#   --all                                   Install Core + Development + Gaming
+#
+# Usage:
+#   Local:
+#     ./setup.sh                       # Core only
+#     ./setup.sh --dev                 # Core + Development
+#     ./setup.sh --gaming              # Core + Gaming
+#     ./setup.sh --all                 # Core + Development + Gaming
+#     DEVELOPMENT=1 GAMING=1 ./setup.sh
+#
+#   Remote (via curl):
+#     bash <(curl -fsSL https://raw.githubusercontent.com/gvrDev/fedora-setup/main/setup.sh) --dev
+# ==============================================================================
 
 set -euo pipefail
 
+# ==============================================================================
+# 1. HELPERS & FLAG PARSING
+# ==============================================================================
+
 log() {
-    printf '\n==> %s\n' "$1"
+    printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$1"
 }
 
+warn() {
+    printf '\n\033[1;33m[!] WARNING:\033[0m %s\n' "$1"
+}
+
+is_true() {
+    local val="${1,,}"
+    [[ "$val" == "1" || "$val" == "true" || "$val" == "yes" || "$val" == "y" ]]
+}
+
+# Read input safely even when script is piped via curl
+prompt_input() {
+    local prompt_msg="$1"
+    local var_name="$2"
+    local default_val="${3:-}"
+    local val=""
+
+    if [[ -t 0 ]]; then
+        read -rp "$prompt_msg" val
+    elif [[ -e /dev/tty ]]; then
+        read -rp "$prompt_msg" val < /dev/tty
+    fi
+
+    if [[ -z "$val" && -n "$default_val" ]]; then
+        val="$default_val"
+    fi
+    printf -v "$var_name" '%s' "$val"
+}
+
+prompt_secret() {
+    local prompt_msg="$1"
+    local var_name="$2"
+    local val=""
+
+    if [[ -t 0 ]]; then
+        read -rsp "$prompt_msg" val
+        echo
+    elif [[ -e /dev/tty ]]; then
+        read -rsp "$prompt_msg" val < /dev/tty
+        echo
+    fi
+    printf -v "$var_name" '%s' "$val"
+}
+
+# Initialize flags from environment variables (default: false)
+DEVELOPMENT="${DEVELOPMENT:-false}"
+GAMING="${GAMING:-false}"
+
+# Parse CLI arguments (override environment variables)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dev|--development)
+            DEVELOPMENT="true"
+            shift
+            ;;
+        --gaming)
+            GAMING="true"
+            shift
+            ;;
+        --all)
+            DEVELOPMENT="true"
+            GAMING="true"
+            shift
+            ;;
+        -h|--help)
+            cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --dev, --development   Include developer tools, runtimes, git config & SSH
+  --gaming               Include Steam, game launchers & gaming flatpaks
+  --all                  Include all configurations (Core, Dev, Gaming)
+  -h, --help             Show this help message
+
+Environment variables:
+  DEVELOPMENT=1|true     Enable development tools
+  GAMING=1|true          Enable gaming tools
+EOF
+            exit 0
+            ;;
+        *)
+            warn "Unknown option: $1"
+            shift
+            ;;
+    esac
+done
+
 if [[ $EUID -eq 0 ]]; then
-    echo "Don't run this script as root."
+    echo "Do not run this script as root." >&2
     exit 1
 fi
+
+# ==============================================================================
+# 2. SUDO AUTHENTICATION & KEEPALIVE
+# ==============================================================================
 
 log "Authenticating sudo"
 sudo -v
@@ -23,50 +138,11 @@ done 2>/dev/null &
 SUDO_KEEPALIVE_PID=$!
 trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT INT TERM
 
-PACKAGES=(
-    @development-tools
-    pciutils
-    wl-clipboard
-    xdg-desktop-portal-gnome
-    brightnessctl
-    playerctl
-    wireplumber
-    git
-    curl
-    wget
-    tar
-    gzip
-    bzip2
-    xz
-    unzip
-    zip
-    procs
-    fuse
-    fuse-libs
-    fuse3
-    lsof
-    tree
-    cmake
-    ninja-build
-    pkg-config
-    openssl
-    openssl-devel
-    ca-certificates
-    podman
-    podman-machine
-    podman-compose
-    fastfetch
-    wezterm
-    fish
-    chromium
-    niri
-    dms
-    gh
-    steam
-    flatpak
-)
+# ==============================================================================
+# 3. CORE: DNF CONFIGURATION & REPOSITORIES
+# ==============================================================================
 
-log "Configuring DNF"
+log "(core) Configuring DNF"
 DNF_CONF="/etc/dnf/dnf.conf"
 if [[ ! -f "$DNF_CONF" ]]; then
     sudo mkdir -p "$(dirname "$DNF_CONF")"
@@ -81,11 +157,14 @@ else
     printf '\n[main]\nmax_parallel_downloads=10\n' | sudo tee -a "$DNF_CONF" >/dev/null
 fi
 
-log "Updating Fedora"
+log "(core) Updating system"
 sudo dnf upgrade -y
 
-log "Installing RPM fusion"
+log "(core) Enabling repositories"
+# OpenH264
 sudo dnf config-manager setopt fedora-cisco-openh264.enabled=1
+
+# RPM Fusion (Free & Nonfree)
 if ! rpm -q rpmfusion-free-release >/dev/null 2>&1; then
     sudo dnf install -y \
         https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
@@ -96,14 +175,63 @@ if ! rpm -q rpmfusion-nonfree-release >/dev/null 2>&1; then
         https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
 fi
 
+# Flatpak Flathub
+sudo dnf install -y flatpak
+sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-log "Installing COPR repositories"
+# COPR: Dank Material Shell
 sudo dnf copr enable -y avengemedia/dms
-sudo dnf copr enable -y wezfurlong/wezterm-nightly
 
+# COPR: WezTerm (if development enabled)
+if is_true "$DEVELOPMENT"; then
+    sudo dnf copr enable -y wezfurlong/wezterm-nightly
+fi
+
+# Enable NVIDIA repo if GPU is detected
+NVIDIA_DETECTED=false
 if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
-    echo "✅ NVIDIA GPU detected."
+    NVIDIA_DETECTED=true
+    log "(core) NVIDIA GPU detected, enabling driver repository"
     sudo dnf config-manager setopt rpmfusion-nonfree-nvidia-driver.enabled=1
+fi
+
+sudo dnf makecache
+
+# ==============================================================================
+# 4. PACKAGE SELECTION & INSTALLATION
+# ==============================================================================
+
+# Core utilities and Wayland desktop environment
+PACKAGES=(
+    pciutils
+    wl-clipboard
+    xdg-desktop-portal-gnome
+    brightnessctl
+    playerctl
+    wireplumber
+    curl
+    wget
+    tar
+    gzip
+    bzip2
+    xz
+    unzip
+    zip
+    fuse
+    fuse-libs
+    fuse3
+    lsof
+    pkg-config
+    openssl
+    openssl-devel
+    ca-certificates
+    chromium
+    niri
+    dms
+)
+
+# NVIDIA proprietary drivers
+if [[ "$NVIDIA_DETECTED" == "true" ]]; then
     PACKAGES+=(
         akmod-nvidia-open
         xorg-x11-drv-nvidia-cuda
@@ -111,124 +239,161 @@ if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
         libva-nvidia-driver
         libva-utils
     )
-else
-    echo "❌ No NVIDIA GPU detected on this system. Skipping driver setup."
 fi
 
-log "Creating repositories cache"
-sudo dnf makecache
+# Development packages
+if is_true "$DEVELOPMENT"; then
+    PACKAGES+=(
+        @development-tools
+        fastfetch
+        tree
+        procs
+        cmake
+        ninja-build
+        podman
+        podman-machine
+        podman-compose
+        wezterm
+        fish
+        git
+        gh
+        neovim
+        tree-sitter-cli
+    )
+fi
 
-log "Installing dnf packages"
-sudo dnf install -y "${PACKAGES[@]}"
-sudo dnf install -y --setopt=install_weak_deps=false \
-    neovim \
-    tree-sitter-cli
+# Gaming packages
+if is_true "$GAMING"; then
+    PACKAGES+=(
+        steam
+    )
+fi
 
-log "Installing multimedia codecs"
+log "Installing DNF packages"
+# Exclude nodejs RPMs to keep neovim/tree-sitter-cli from pulling in system Node 22 (managed by mise)
+sudo dnf install -y --exclude='nodejs*' "${PACKAGES[@]}"
+
+# ==============================================================================
+# 5. CORE: MULTIMEDIA CODECS & DESKTOP FLATPAKS
+# ==============================================================================
+
+log "(core) Installing multimedia codecs"
 sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
+# Exclude libheif-freeworld to avoid version mismatch with Fedora updates
 sudo dnf group upgrade -y multimedia \
     --setopt=install_weak_deps=false \
     --exclude=PackageKit-gstreamer-plugin,libheif-freeworld \
     --allowerasing
 
-log "Post install (dnf packages)"
+log "(core) Installing core Flatpak applications"
+CORE_FLATPAKS=(
+    org.mozilla.thunderbird
+    com.bitwarden.desktop
+    com.brave.Browser
+)
+flatpak install -y --noninteractive flathub "${CORE_FLATPAKS[@]}"
+
+# Core systemd services
 systemctl --user add-wants niri.service dms
-if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
+
+# NVIDIA post-install configuration
+if [[ "$NVIDIA_DETECTED" == "true" ]]; then
+    log "(core) Configuring NVIDIA power management & kernel modules"
     sudo systemctl enable nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service
     sudo akmods --force
     sudo dracut --force
 fi
 
-log "Installing MISE and tools"
-# mise
-if ! command -v mise >/dev/null 2>&1; then
-    curl https://mise.run | sh
-fi
+# ==============================================================================
+# 6. DEVELOPMENT: TOOLCHAINS, GIT & SSH (IF ENABLED)
+# ==============================================================================
 
-# BASE
-~/.local/bin/mise use -g go@latest
-~/.local/bin/mise use -g rust@stable
-~/.local/bin/mise use -g odin@latest
-~/.local/bin/mise use -g postgres@latest
+if is_true "$DEVELOPMENT"; then
+    log "(development) Installing AWS Session Manager plugin"
+    if ! command -v session-manager-plugin >/dev/null 2>&1; then
+        case "$(uname -m)" in
+            x86_64)  sudo dnf install -y "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm" ;;
+            aarch64) sudo dnf install -y "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_arm64/session-manager-plugin.rpm" ;;
+        esac
+    fi
 
-# JS
-~/.local/bin/mise use -g node@lts
-~/.local/bin/mise use -g yarn@latest
-~/.local/bin/mise use -g pnpm@latest
-~/.local/bin/mise use -g bun@latest
-~/.local/bin/mise use -g nub@latest
+    log "(development) Setting up mise (runtime & tool version manager)"
+    if ! command -v mise >/dev/null 2>&1; then
+        curl https://mise.run | sh
+    fi
 
-# CLI
-~/.local/bin/mise use -g ripgrep@latest
-~/.local/bin/mise use -g ast-grep@latest
-~/.local/bin/mise use -g fzf@latest
-~/.local/bin/mise use -g fd@latest
-~/.local/bin/mise use -g chezmoi@latest
-~/.local/bin/mise use -g just@latest
-~/.local/bin/mise use -g jq@latest
-~/.local/bin/mise use -g yq@latest
-~/.local/bin/mise use -g mongosh@latest
-~/.local/bin/mise use -g shellcheck@latest
-~/.local/bin/mise use -g semgrep@latest
-~/.local/bin/mise use -g betterleaks@latest
-~/.local/bin/mise use -g hyperfine@latest
-~/.local/bin/mise use -g eza@latest
-~/.local/bin/mise use -g bat@latest
-~/.local/bin/mise use -g zoxide@latest
-~/.local/bin/mise use -g duf@latest
-~/.local/bin/mise use -g dust@latest
-~/.local/bin/mise use -g bottom@latest
+    log "(development) Installing mise tools & runtimes"
+    # Core runtimes
+    ~/.local/bin/mise use -g go
+    ~/.local/bin/mise use -g rust@stable
+    ~/.local/bin/mise use -g odin
+    ~/.local/bin/mise use -g pipx
+    ~/.local/bin/mise use -g postgres
 
-# TUI
-~/.local/bin/mise use -g lazygit@latest
-~/.local/bin/mise use -g opencode@latest
-~/.local/bin/mise use -g github:can1357/oh-my-pi
-~/.local/bin/mise use -g cargo:raine/workmux
+    # JavaScript / Node
+    ~/.local/bin/mise use -g node@lts
+    ~/.local/bin/mise use -g yarn
+    ~/.local/bin/mise use -g pnpm
+    ~/.local/bin/mise use -g bun
+    ~/.local/bin/mise use -g nub
 
-log "Installing flatpak apps"
-sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install -y --noninteractive flathub \
-    org.mozilla.thunderbird \
-    com.bitwarden.desktop \
-    com.brave.Browser \
-    com.heroicgameslauncher.hgl \
-    com.discordapp.Discord \
-    com.usebottles.bottles \
-    com.github.tchx84.Flatseal \
-    it.mijorus.gearlever \
-    com.vysp3r.ProtonPlus \
-    com.github.Matoking.protontricks
+    # CLI Utilities
+    ~/.local/bin/mise use -g ripgrep
+    ~/.local/bin/mise use -g ast-grep
+    ~/.local/bin/mise use -g fzf
+    ~/.local/bin/mise use -g fd
+    ~/.local/bin/mise use -g chezmoi
+    ~/.local/bin/mise use -g just
+    ~/.local/bin/mise use -g jq
+    ~/.local/bin/mise use -g yq
+    ~/.local/bin/mise use -g mongosh
+    ~/.local/bin/mise use -g shellcheck
+    ~/.local/bin/mise use -g semgrep
+    ~/.local/bin/mise use -g betterleaks
+    ~/.local/bin/mise use -g hyperfine
+    ~/.local/bin/mise use -g eza
+    ~/.local/bin/mise use -g bat
+    ~/.local/bin/mise use -g zoxide
+    ~/.local/bin/mise use -g duf
+    ~/.local/bin/mise use -g dust
+    ~/.local/bin/mise use -g bottom
+    ~/.local/bin/mise use -g awscli
+    ~/.local/bin/mise use -g delta
 
-log "Generating ssh keys"
-FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
-if [[ -z "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
-    read -rp "GitHub username: " FEDORA_SCRIPT_GITHUB_USER
-fi
-if [[ -z "${FEDORA_SCRIPT_GIT_NAME:-}" ]]; then
-    read -rp "Git author name [$FEDORA_SCRIPT_GITHUB_USER]: " FEDORA_SCRIPT_GIT_NAME
-    FEDORA_SCRIPT_GIT_NAME="${FEDORA_SCRIPT_GIT_NAME:-$FEDORA_SCRIPT_GITHUB_USER}"
-fi
-if [[ -z "${FEDORA_SCRIPT_SSH_EMAIL:-}" ]]; then
-    read -rp "SSH & Git email: " FEDORA_SCRIPT_SSH_EMAIL
-fi
-if [[ -z "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
-    read -rsp "SSH key passphrase : " FEDORA_SCRIPT_SSH_PASSPHRASE
-    echo
-fi
+    # TUI
+    ~/.local/bin/mise use -g lazygit
+    ~/.local/bin/mise use -g opencode
+    ~/.local/bin/mise use -g github:can1357/oh-my-pi
+    ~/.local/bin/mise use -g cargo:raine/workmux
 
-mkdir -p "$HOME/.ssh"
-chmod 700 "$HOME/.ssh"
-touch "$HOME/.ssh/config"
-chmod 600 "$HOME/.ssh/config"
+    log "(development) Configuring SSH keys & GitHub integration"
+    FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
+    if [[ -z "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
+        prompt_input "GitHub username: " FEDORA_SCRIPT_GITHUB_USER
+    fi
+    if [[ -z "${FEDORA_SCRIPT_GIT_NAME:-}" ]]; then
+        prompt_input "Git author name [$FEDORA_SCRIPT_GITHUB_USER]: " FEDORA_SCRIPT_GIT_NAME "$FEDORA_SCRIPT_GITHUB_USER"
+    fi
+    if [[ -z "${FEDORA_SCRIPT_SSH_EMAIL:-}" ]]; then
+        prompt_input "SSH & Git email: " FEDORA_SCRIPT_SSH_EMAIL
+    fi
+    if [[ -z "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
+        prompt_secret "SSH key passphrase (leave empty for none): " FEDORA_SCRIPT_SSH_PASSPHRASE
+    fi
 
-# Pre-seed GitHub host keys to prevent interactive host verification prompts
-if ! ssh-keygen -F github.com >/dev/null 2>&1; then
-    ssh-keyscan -t ed25519,rsa github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
-    chmod 600 "$HOME/.ssh/known_hosts"
-fi
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    touch "$HOME/.ssh/config"
+    chmod 600 "$HOME/.ssh/config"
 
-if ! grep -q "Host github.com" "$HOME/.ssh/config"; then
-    cat >> "$HOME/.ssh/config" <<EOF
+    # Pre-seed GitHub host keys to prevent interactive host verification prompts
+    if ! ssh-keygen -F github.com >/dev/null 2>&1; then
+        ssh-keyscan -t ed25519,rsa github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+        chmod 600 "$HOME/.ssh/known_hosts"
+    fi
+
+    if ! grep -q "Host github.com" "$HOME/.ssh/config"; then
+        cat >> "$HOME/.ssh/config" <<EOF
 
 Host github.com
     HostName github.com
@@ -238,97 +403,141 @@ Host github.com
     AddKeysToAgent yes
     StrictHostKeyChecking accept-new
 EOF
-fi
-
-generate_ssh_key() {
-    local key_path="$1"
-
-    if [[ -f "$key_path" ]]; then
-        echo "Skipping existing key: $key_path"
-        return
     fi
 
-    ssh-keygen \
-        -t ed25519 \
-        -f "$key_path" \
-        -C "$FEDORA_SCRIPT_SSH_EMAIL" \
-        -N "$FEDORA_SCRIPT_SSH_PASSPHRASE"
-}
+    generate_ssh_key() {
+        local key_path="$1"
+        if [[ -f "$key_path" ]]; then
+            echo "Skipping existing key: $key_path"
+            return
+        fi
 
-generate_ssh_key "$HOME/.ssh/github"
-generate_ssh_key "$HOME/.ssh/skey"
+        ssh-keygen \
+            -t ed25519 \
+            -f "$key_path" \
+            -C "$FEDORA_SCRIPT_SSH_EMAIL" \
+            -N "$FEDORA_SCRIPT_SSH_PASSPHRASE"
+    }
 
-git config --global user.name "$FEDORA_SCRIPT_GIT_NAME"
-git config --global user.email "$FEDORA_SCRIPT_SSH_EMAIL"
-git config --global gpg.format ssh
-git config --global user.signingkey "$HOME/.ssh/skey.pub"
-git config --global commit.gpgsign true
+    generate_ssh_key "$HOME/.ssh/github"
+    generate_ssh_key "$HOME/.ssh/skey"
 
-log "Starting SSH Agent and adding keys"
+    log "(development) Configuring global .gitconfig"
+    git config --global user.name "$FEDORA_SCRIPT_GIT_NAME"
+    git config --global user.email "$FEDORA_SCRIPT_SSH_EMAIL"
+    git config --global gpg.format ssh
+    git config --global user.signingkey "$HOME/.ssh/skey.pub"
+    git config --global commit.gpgsign true
+    git config --global tag.gpgsign true
+    git config --global core.editor nvim
+    git config --global core.pager delta
+    git config --global interactive.diffFilter 'delta --color-only'
+    git config --global delta.navigate true
+    git config --global delta.dark true
+    git config --global merge.conflictStyle zdiff3
+    git config --global diff.algorithm histogram
+    git config --global diff.colorMoved default
+    git config --global diff.mnemonicPrefix true
+    git config --global rerere.enabled true
+    git config --global rerere.autoupdate true
 
-eval "$(ssh-agent -s)" >/dev/null
+    log "(development) Starting SSH Agent and adding keys"
+    eval "$(ssh-agent -s)" >/dev/null
 
-if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
-    askpass="$(mktemp)"
-    chmod 700 "$askpass"
-
-    # Unquote EOF so the passphrase value is written directly into the file
-    cat >"$askpass" <<EOF
+    if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
+        askpass="$(mktemp)"
+        chmod 700 "$askpass"
+        cat >"$askpass" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "$FEDORA_SCRIPT_SSH_PASSPHRASE"
 EOF
-
-    trap 'rm -f "$askpass"' EXIT
-
-    SSH_ASKPASS="$askpass" \
-    SSH_ASKPASS_REQUIRE=force \
-    DISPLAY=:0 \
+        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add "$HOME/.ssh/github"
+        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add "$HOME/.ssh/skey"
+        rm -f "$askpass"
+    else
         ssh-add "$HOME/.ssh/github"
-
-    SSH_ASKPASS="$askpass" \
-    SSH_ASKPASS_REQUIRE=force \
-    DISPLAY=:0 \
         ssh-add "$HOME/.ssh/skey"
+    fi
+
+    log "(development) Authenticating GitHub CLI"
+    if ! gh auth status 2>&1 | grep -qE "admin:public_key|admin:ssh_signing_key"; then
+        gh auth login --web --skip-ssh-key --git-protocol ssh --hostname github.com --clipboard -s admin:public_key,admin:ssh_signing_key
+    fi
+
+    log "(development) Uploading GitHub SSH keys"
+    HOST_TAG="${HOSTNAME:-$(uname -n)}"
+
+    upload_ssh_key() {
+        local key_path="$1"
+        local title="$2"
+        local type="$3"
+
+        if gh ssh-key list 2>/dev/null | grep -qF "$title"; then
+            echo "Key '$title' already exists on GitHub, skipping."
+            return 0
+        fi
+
+        if ! gh ssh-key add "$key_path" --title "$title" --type "$type"; then
+            echo "Warning: Could not add key '$title' to GitHub (it may already be registered)."
+        fi
+    }
+
+    upload_ssh_key "$HOME/.ssh/github.pub" "$HOST_TAG-github" "authentication"
+    upload_ssh_key "$HOME/.ssh/skey.pub" "$HOST_TAG-signing" "signing"
+
+    log "(development) Cloning dotfiles via chezmoi"
+    if ! ~/.local/bin/mise exec chezmoi@latest -- chezmoi init --apply "git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"; then
+        warn "Failed to clone/apply dotfiles from git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"
+        echo "Verify the repository exists and your SSH key is authorized."
+    fi
+fi
+
+# ==============================================================================
+# 7. GAMING: FLATPAKS (IF ENABLED)
+# ==============================================================================
+
+if is_true "$GAMING"; then
+    log "(gaming) Installing gaming Flatpaks"
+    GAMING_FLATPAKS=(
+        com.heroicgameslauncher.hgl
+        com.discordapp.Discord
+        com.usebottles.bottles
+        com.github.tchx84.Flatseal
+        it.mijorus.gearlever
+        com.vysp3r.ProtonPlus
+        com.github.Matoking.protontricks
+    )
+    flatpak install -y --noninteractive flathub "${GAMING_FLATPAKS[@]}"
+fi
+
+# ==============================================================================
+# 8. FINISH
+# ==============================================================================
+
+log "Setup Complete!"
+echo
+echo "Installed components:"
+echo "  [x] Core system, Wayland (niri/dms), codecs, and baseline flatpaks"
+if is_true "$DEVELOPMENT"; then
+    echo "  [x] Development toolchains, runtimes, SSH & Git config"
 else
-    ssh-add "$HOME/.ssh/github"
-    ssh-add "$HOME/.ssh/skey"
+    echo "  [ ] Development toolchains (skipped, run with --dev to install)"
 fi
-
-log "Authenticating GitHub"
-sudo dnf install -y gh
-if ! gh auth status 2>&1 | grep -qE "admin:public_key|admin:ssh_signing_key"; then
-    gh auth login --web --skip-ssh-key --git-protocol ssh --hostname github.com --clipboard -s admin:public_key,admin:ssh_signing_key
+if is_true "$GAMING"; then
+    echo "  [x] Steam and gaming flatpaks"
+else
+    echo "  [ ] Gaming packages (skipped, run with --gaming to install)"
 fi
-
-log "Uploading GitHub SSH key"
-HOST_TAG="${HOSTNAME:-$(uname -n)}"
-
-upload_ssh_key() {
-    local key_path="$1"
-    local title="$2"
-    local type="$3"
-
-    if gh ssh-key list 2>/dev/null | grep -qF "$title"; then
-        echo "Key '$title' already exists on GitHub, skipping."
-        return 0
-    fi
-
-    if ! gh ssh-key add "$key_path" --title "$title" --type "$type"; then
-        echo "Warning: Could not add key '$title' to GitHub (it may already be registered)."
-    fi
-}
-
-upload_ssh_key "$HOME/.ssh/github.pub" "$HOST_TAG-github" "authentication"
-upload_ssh_key "$HOME/.ssh/skey.pub" "$HOST_TAG-signing" "signing"
-
-log "Cloning dotfiles"
-if ! ~/.local/bin/mise exec chezmoi@latest -- chezmoi init --apply "git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"; then
-    echo "Warning: Failed to clone/apply dotfiles from git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"
-    echo "Verify the repository exists and your SSH key is authorized."
+if [[ "$NVIDIA_DETECTED" == "true" ]]; then
+    echo "  [x] NVIDIA proprietary drivers and CUDA"
 fi
-
-log "Done"
 
 echo
-echo "Fedora setup complete."
-echo "Restart your shell or log out/in to apply changes."
+echo "================================================================"
+if [[ "$NVIDIA_DETECTED" == "true" ]]; then
+    echo "⚠️  IMPORTANT: NVIDIA drivers installed. Please reboot your system."
+    echo "    Command: sudo reboot"
+else
+    echo "Restart your shell or log out/in to apply all changes."
+fi
+echo "================================================================"
