@@ -110,7 +110,10 @@ systemctl --user add-wants niri.service dms
 
 log "Installing multimedia codecs"
 sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
-sudo dnf group upgrade -y multimedia --setopt=install_weak_deps=false --exclude=PackageKit-gstreamer-plugin
+sudo dnf group upgrade -y multimedia \
+    --setopt=install_weak_deps=false \
+    --exclude=PackageKit-gstreamer-plugin,libheif-freeworld \
+    --allowerasing
 
 log "Installing CLI tools"
 # mise
