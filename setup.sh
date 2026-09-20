@@ -188,13 +188,20 @@ if is_true "$DEVELOPMENT"; then
 fi
 
 # Enable NVIDIA repo if GPU is detected
+# Checks sysfs PCI vendor ID 0x10de natively (doesn't require pciutils pre-installed) or lspci
 NVIDIA_DETECTED=false
-if lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'; then
+if grep -qs "0x10de" /sys/bus/pci/devices/*/vendor 2>/dev/null || \
+   (command -v lspci >/dev/null 2>&1 && lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'); then
     NVIDIA_DETECTED=true
-    log "(core) NVIDIA GPU detected, enabling driver repository"
-    sudo dnf config-manager setopt rpmfusion-nonfree-nvidia-driver.enabled=1
+    log "(core) NVIDIA GPU detected, ensuring driver repository is enabled"
+    if dnf repolist all 2>/dev/null | grep -q 'rpmfusion-nonfree-nvidia-driver'; then
+        sudo dnf config-manager setopt rpmfusion-nonfree-nvidia-driver.enabled=1 2>/dev/null || true
+    fi
+    # Enable rpmfusion-nonfree-tainted for akmod-nvidia-open
+    if ! rpm -q rpmfusion-nonfree-release-tainted >/dev/null 2>&1; then
+        sudo dnf install -y rpmfusion-nonfree-release-tainted
+    fi
 fi
-
 sudo dnf makecache
 
 # ==============================================================================
@@ -230,12 +237,14 @@ PACKAGES=(
     dms
     greetd
     dms-greeter
+    acl
+    gnome-keyring-pam
 )
-
 # NVIDIA proprietary drivers
 if [[ "$NVIDIA_DETECTED" == "true" ]]; then
     PACKAGES+=(
         akmod-nvidia-open
+        xorg-x11-drv-nvidia-power
         xorg-x11-drv-nvidia-cuda
         xorg-x11-drv-nvidia-libs.i686
         libva-nvidia-driver
@@ -281,8 +290,8 @@ sudo dnf install -y --exclude='nodejs*' "${PACKAGES[@]}"
 
 log "(core) Installing multimedia codecs"
 sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
-# Exclude libheif-freeworld to avoid version mismatch with Fedora updates
-sudo dnf group upgrade -y multimedia \
+# Modern DNF5 / RPM Fusion multimedia group installation
+sudo dnf install -y @multimedia \
     --setopt=install_weak_deps=false \
     --exclude=PackageKit-gstreamer-plugin,libheif-freeworld \
     --allowerasing
@@ -311,13 +320,17 @@ command = "niri-session 2>/dev/null"
 user = "$ACTUAL_USER"
 
 [default_session]
-command = "dms-greeter"
+command = "dms-greeter --command niri"
 user = "greeter"
 EOF
 
-# Ensure greeter user has video and render group permissions for DMS greeter
+# Set up greeter cache directory and group permissions for DMS greeter
+sudo mkdir -p /var/cache/dms-greeter
 if id greeter &>/dev/null; then
+    sudo chown -R greeter:greeter /var/cache/dms-greeter 2>/dev/null || true
+    sudo chmod 2770 /var/cache/dms-greeter
     sudo usermod -aG video,render greeter 2>/dev/null || true
+    sudo usermod -aG greeter "$ACTUAL_USER" 2>/dev/null || true
 fi
 
 # Switch display manager from GDM to greetd
@@ -356,6 +369,36 @@ chmod 644 "$DEFAULT_FILE"
 if [[ "$NVIDIA_DETECTED" == "true" ]]; then
     log "(core) Configuring NVIDIA power management & kernel modules"
     sudo systemctl enable nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service
+    # Protect akmod-nvidia-open from accidental dnf autoremove cleanup (DNF5 & DNF4)
+    sudo dnf mark user akmod-nvidia-open 2>/dev/null || sudo dnf mark install akmod-nvidia-open 2>/dev/null || true
+
+    # Fix high VRAM usage leak on niri with NVIDIA drivers (official niri recommendation)
+    sudo mkdir -p /etc/nvidia/nvidia-application-profiles-rc.d
+    sudo tee /etc/nvidia/nvidia-application-profiles-rc.d/50-limit-free-buffer-pool-in-wayland-compositors.json >/dev/null <<'JSON'
+{
+    "rules": [
+        {
+            "pattern": {
+                "feature": "procname",
+                "matches": "niri"
+            },
+            "profile": "Limit Free Buffer Pool On Wayland Compositors"
+        }
+    ],
+    "profiles": [
+        {
+            "name": "Limit Free Buffer Pool On Wayland Compositors",
+            "settings": [
+                {
+                    "key": "GLVidHeapReuseRatio",
+                    "value": 0
+                }
+            ]
+        }
+    ]
+}
+JSON
+
     sudo akmods --force
     sudo dracut --force
 fi
