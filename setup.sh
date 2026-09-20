@@ -228,6 +228,8 @@ PACKAGES=(
     chromium
     niri
     dms
+    greetd
+    dms-greeter
 )
 
 # NVIDIA proprietary drivers
@@ -295,6 +297,60 @@ flatpak install -y --noninteractive flathub "${CORE_FLATPAKS[@]}"
 
 # Core systemd services
 systemctl --user add-wants niri.service dms
+
+log "(core) Configuring greetd display manager & autologin"
+ACTUAL_USER="${SUDO_USER:-$USER}"
+
+sudo mkdir -p /etc/greetd
+sudo tee /etc/greetd/config.toml >/dev/null <<EOF
+[terminal]
+vt = 1
+
+[initial_session]
+command = "niri-session"
+user = "$ACTUAL_USER"
+
+[default_session]
+command = "dms-greeter"
+user = "greeter"
+EOF
+
+# Ensure greeter user has video and render group permissions for DMS greeter
+if id greeter &>/dev/null; then
+    sudo usermod -aG video,render greeter 2>/dev/null || true
+fi
+
+# Switch display manager from GDM to greetd
+sudo systemctl disable gdm.service 2>/dev/null || true
+sudo systemctl enable greetd.service
+
+log "(core) Setting up passwordless default keyring"
+KEYRING_DIR="$HOME/.local/share/keyrings"
+KEYRING_FILE="$KEYRING_DIR/Default_keyring.keyring"
+DEFAULT_FILE="$KEYRING_DIR/default"
+
+mkdir -p "$KEYRING_DIR"
+
+if [[ ! -f "$KEYRING_FILE" ]]; then
+    cat > "$KEYRING_FILE" <<EOF
+[keyring]
+display-name=Default keyring
+ctime=$(date +%s)
+mtime=0
+lock-on-idle=false
+lock-after=false
+EOF
+fi
+
+if [[ ! -f "$DEFAULT_FILE" ]]; then
+    cat > "$DEFAULT_FILE" <<EOF
+Default_keyring
+EOF
+fi
+
+chmod 700 "$KEYRING_DIR"
+chmod 600 "$KEYRING_FILE"
+chmod 644 "$DEFAULT_FILE"
 
 # NVIDIA post-install configuration
 if [[ "$NVIDIA_DETECTED" == "true" ]]; then
