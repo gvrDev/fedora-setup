@@ -270,6 +270,7 @@ if is_true "$DEVELOPMENT"; then
         gh
         neovim
         tree-sitter-cli
+        fira-code-fonts
     )
 fi
 
