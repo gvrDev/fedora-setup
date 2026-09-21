@@ -179,9 +179,6 @@ fi
 sudo dnf install -y flatpak
 sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-# COPR: Dank Material Shell
-sudo dnf copr enable -y avengemedia/dms
-
 # COPR: WezTerm (if development enabled)
 if is_true "$DEVELOPMENT"; then
     sudo dnf copr enable -y wezfurlong/wezterm-nightly
