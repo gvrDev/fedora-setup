@@ -464,7 +464,7 @@ if is_true "$DEVELOPMENT"; then
         github:can1357/oh-my-pi
         cargo:raine/workmux
     )
-    ~/.local/bin/mise use --workers 6 -g "${MISE_PACKAGES[@]}"
+    ~/.local/bin/mise use --jobs 6 -g "${MISE_PACKAGES[@]}"
 
     log "(development) Configuring session environment for mise"
     mkdir -p "$HOME/.config/environment.d"
