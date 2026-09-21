@@ -310,7 +310,7 @@ sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
 sudo tee /etc/systemd/system/getty@tty1.service.d/autologin.conf >/dev/null <<EOF
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin $ACTUAL_USER %I \$TERM
+ExecStart=-/sbin/agetty -o '-p -f -- \\\\u' --noclear --autologin $ACTUAL_USER %I \$TERM
 Type=idle
 EOF
 
@@ -320,14 +320,19 @@ sudo systemctl disable gdm.service greetd.service 2>/dev/null || true
 # Idempotently configure ~/.bash_profile to launch Niri on TTY1
 BASH_PROFILE="$HOME/.bash_profile"
 touch "$BASH_PROFILE"
-if ! grep -q "exec niri-session" "$BASH_PROFILE"; then
+if ! grep -q "niri-session" "$BASH_PROFILE"; then
     cat >> "$BASH_PROFILE" <<'EOF'
 
 # Auto-start Niri on TTY1 login
 if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    exec niri-session
+    if ! systemctl --user -q is-active niri.service; then
+        exec niri-session -l
+    fi
 fi
 EOF
+else
+    # Update legacy 'exec niri-session' without -l to prevent login loop
+    sed -i -E 's/exec niri-session([[:space:]]*)$/exec niri-session -l/' "$BASH_PROFILE"
 fi
 
 log "(core) Setting up passwordless default keyring"
@@ -393,8 +398,16 @@ if [[ "$NVIDIA_DETECTED" == "true" ]]; then
 JSON
 
     sudo akmods --force
-    sudo dracut --force
 fi
+
+log "(core) Configuring Bluetooth in initramfs for LUKS unlock"
+sudo mkdir -p /etc/dracut.conf.d
+sudo tee /etc/dracut.conf.d/bt.conf >/dev/null <<'EOF'
+add_dracutmodules+=" bluetooth "
+EOF
+
+log "(core) Rebuilding initramfs with dracut"
+sudo dracut --force
 
 # ==============================================================================
 # 6. DEVELOPMENT: TOOLCHAINS, GIT & SSH (IF ENABLED)
