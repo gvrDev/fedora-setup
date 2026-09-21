@@ -281,7 +281,7 @@ fi
 
 log "Installing DNF packages"
 # Exclude nodejs RPMs to keep neovim/tree-sitter-cli from pulling in system Node 22 (managed by mise)
-sudo dnf install -y --exclude='nodejs*' "${PACKAGES[@]}"
+sudo dnf install -y --exclude='nodejs*,ripgrep' "${PACKAGES[@]}"
 
 # ==============================================================================
 # 5. CORE: MULTIMEDIA CODECS & DESKTOP FLATPAKS
@@ -424,48 +424,47 @@ if is_true "$DEVELOPMENT"; then
     fi
 
     log "(development) Installing mise tools & runtimes"
-    # Core runtimes
-    ~/.local/bin/mise use -g go
-    ~/.local/bin/mise use -g rust@stable
-    ~/.local/bin/mise use -g odin
-    ~/.local/bin/mise use -g pipx
-    ~/.local/bin/mise use -g postgres
-
-    # JavaScript / Node
-    ~/.local/bin/mise use -g node@lts
-    ~/.local/bin/mise use -g yarn
-    ~/.local/bin/mise use -g pnpm
-    ~/.local/bin/mise use -g bun
-    ~/.local/bin/mise use -g nub
-
-    # CLI Utilities
-    ~/.local/bin/mise use -g ripgrep
-    ~/.local/bin/mise use -g ast-grep
-    ~/.local/bin/mise use -g fzf
-    ~/.local/bin/mise use -g fd
-    ~/.local/bin/mise use -g chezmoi
-    ~/.local/bin/mise use -g just
-    ~/.local/bin/mise use -g jq
-    ~/.local/bin/mise use -g yq
-    ~/.local/bin/mise use -g mongosh
-    ~/.local/bin/mise use -g shellcheck
-    ~/.local/bin/mise use -g semgrep
-    ~/.local/bin/mise use -g betterleaks
-    ~/.local/bin/mise use -g hyperfine
-    ~/.local/bin/mise use -g eza
-    ~/.local/bin/mise use -g bat
-    ~/.local/bin/mise use -g zoxide
-    ~/.local/bin/mise use -g duf
-    ~/.local/bin/mise use -g dust
-    ~/.local/bin/mise use -g bottom
-    ~/.local/bin/mise use -g awscli
-    ~/.local/bin/mise use -g delta
-
-    # TUI
-    ~/.local/bin/mise use -g lazygit
-    ~/.local/bin/mise use -g opencode
-    ~/.local/bin/mise use -g github:can1357/oh-my-pi
-    ~/.local/bin/mise use -g cargo:raine/workmux
+    MISE_PACKAGES=(
+        go
+        rust@stable
+        odin
+        pipx
+        postgres
+        # JavaScript / Node
+        node@lts
+        yarn
+        pnpm
+        bun
+        nub
+        # CLI Utilities
+        ripgrep
+        ast-grep
+        fzf
+        fd
+        chezmoi
+        just
+        jq
+        yq
+        mongosh
+        shellcheck
+        semgrep
+        betterleaks
+        hyperfine
+        eza
+        bat
+        zoxide
+        duf
+        dust
+        bottom
+        awscli
+        delta
+        # TUI
+        lazygit
+        opencode
+        github:can1357/oh-my-pi
+        cargo:raine/workmux
+    )
+    ~/.local/bin/mise use --workers 6 -g "${MISE_PACKAGES[@]}"
 
     log "(development) Configuring SSH keys & GitHub integration"
     FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
