@@ -466,13 +466,6 @@ if is_true "$DEVELOPMENT"; then
     )
     ~/.local/bin/mise use --jobs 6 -g "${MISE_PACKAGES[@]}"
 
-    log "(development) Configuring session environment for mise"
-    mkdir -p "$HOME/.config/environment.d"
-    cat > "$HOME/.config/environment.d/20-mise.conf" <<'EOF'
-PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${HOME}/.cargo/bin:${HOME}/go/bin:${PATH}"
-EOF
-    export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/go/bin:$PATH"
-
     log "(development) Configuring SSH keys & GitHub integration"
     FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
     if [[ -z "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
