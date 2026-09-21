@@ -295,7 +295,6 @@ sudo dnf install -y @multimedia \
 log "(core) Installing core Flatpak applications"
 CORE_FLATPAKS=(
     org.mozilla.thunderbird
-    com.bitwarden.desktop
     com.brave.Browser
 )
 flatpak install -y --noninteractive flathub "${CORE_FLATPAKS[@]}"
