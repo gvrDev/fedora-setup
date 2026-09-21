@@ -506,7 +506,7 @@ Host github.com
     User git
     IdentityFile ~/.ssh/github
     IdentitiesOnly yes
-    AddKeysToAgent yes
+    AddKeysToAgent 8h
     StrictHostKeyChecking accept-new
 EOF
     fi
@@ -547,9 +547,16 @@ EOF
     git config --global rerere.enabled true
     git config --global rerere.autoupdate true
 
-    log "(development) Starting SSH Agent and adding keys"
-    eval "$(ssh-agent -s)" >/dev/null
+    log "(development) Enabling systemd SSH agent and session environment"
+    systemctl --user enable --now ssh-agent.socket
+    export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-agent.socket"
 
+    mkdir -p "$HOME/.config/environment.d"
+    cat > "$HOME/.config/environment.d/10-ssh-agent.conf" <<'EOF'
+SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"
+EOF
+
+    log "(development) Adding keys to SSH Agent (8h lifetime)"
     if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
         askpass="$(mktemp)"
         chmod 700 "$askpass"
@@ -557,12 +564,12 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "$FEDORA_SCRIPT_SSH_PASSPHRASE"
 EOF
-        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add "$HOME/.ssh/github"
-        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add "$HOME/.ssh/skey"
+        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add -t 8h "$HOME/.ssh/github"
+        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add -t 8h "$HOME/.ssh/skey"
         rm -f "$askpass"
     else
-        ssh-add "$HOME/.ssh/github"
-        ssh-add "$HOME/.ssh/skey"
+        ssh-add -t 8h "$HOME/.ssh/github"
+        ssh-add -t 8h "$HOME/.ssh/skey"
     fi
 
     log "(development) Authenticating GitHub CLI"
