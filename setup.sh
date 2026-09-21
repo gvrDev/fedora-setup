@@ -235,7 +235,6 @@ PACKAGES=(
     chromium
     niri
     dms
-    greetd
     acl
     gnome-keyring-pam
 )
@@ -307,31 +306,32 @@ flatpak install -y --noninteractive flathub "${CORE_FLATPAKS[@]}"
 # Core systemd services
 systemctl --user add-wants niri.service dms
 
-log "(core) Configuring greetd display manager & autologin"
+log "(core) Configuring TTY1 autologin & auto-starting Niri"
 ACTUAL_USER="${SUDO_USER:-$USER}"
 
-sudo mkdir -p /etc/greetd
-sudo tee /etc/greetd/config.toml >/dev/null <<EOF
-[terminal]
-vt = 1
-
-[initial_session]
-command = "niri-session 2>/dev/null"
-user = "$ACTUAL_USER"
-
-[default_session]
-command = "agreety --cmd niri-session"
-user = "greeter"
+sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
+sudo tee /etc/systemd/system/getty@tty1.service.d/autologin.conf >/dev/null <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin $ACTUAL_USER %I \$TERM
+Type=idle
 EOF
 
-# Ensure greeter user exists for greetd fallback default_session
-if ! id greeter &>/dev/null; then
-    sudo useradd -r -M -G video greeter 2>/dev/null || true
-fi
+# Disable graphical display managers in favor of direct TTY1 autologin
+sudo systemctl disable gdm.service greetd.service 2>/dev/null || true
 
-# Switch display manager from GDM to greetd
-sudo systemctl disable gdm.service 2>/dev/null || true
-sudo systemctl enable greetd.service
+# Idempotently configure ~/.bash_profile to launch Niri on TTY1
+BASH_PROFILE="$HOME/.bash_profile"
+touch "$BASH_PROFILE"
+if ! grep -q "exec niri-session" "$BASH_PROFILE"; then
+    cat >> "$BASH_PROFILE" <<'EOF'
+
+# Auto-start Niri on TTY1 login
+if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    exec niri-session
+fi
+EOF
+fi
 
 log "(core) Setting up passwordless default keyring"
 KEYRING_DIR="$HOME/.local/share/keyrings"
