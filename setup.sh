@@ -409,6 +409,12 @@ fi
 # ==============================================================================
 
 if is_true "$DEVELOPMENT"; then
+    log "(development) Setting up dev-utils"
+    mkdir -p "$HOME/dev-utils"
+    if [[ ! -f "$HOME/dev-utils/global-bundle.pem" ]]; then
+        curl -sS "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" > "$HOME/dev-utils/global-bundle.pem"
+    fi
+
     log "(development) Installing AWS Session Manager plugin"
     if ! command -v session-manager-plugin >/dev/null 2>&1; then
         case "$(uname -m)" in
