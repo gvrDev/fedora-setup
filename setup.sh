@@ -236,7 +236,6 @@ PACKAGES=(
     niri
     dms
     greetd
-    dms-greeter
     acl
     gnome-keyring-pam
 )
@@ -321,17 +320,13 @@ command = "niri-session 2>/dev/null"
 user = "$ACTUAL_USER"
 
 [default_session]
-command = "dms-greeter --command niri"
+command = "agreety --cmd niri-session"
 user = "greeter"
 EOF
 
-# Set up greeter cache directory and group permissions for DMS greeter
-sudo mkdir -p /var/cache/dms-greeter
-if id greeter &>/dev/null; then
-    sudo chown -R greeter:greeter /var/cache/dms-greeter 2>/dev/null || true
-    sudo chmod 2770 /var/cache/dms-greeter
-    sudo usermod -aG video,render greeter 2>/dev/null || true
-    sudo usermod -aG greeter "$ACTUAL_USER" 2>/dev/null || true
+# Ensure greeter user exists for greetd fallback default_session
+if ! id greeter &>/dev/null; then
+    sudo useradd -r -M -G video greeter 2>/dev/null || true
 fi
 
 # Switch display manager from GDM to greetd
