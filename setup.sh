@@ -179,14 +179,10 @@ fi
 sudo dnf install -y flatpak
 sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-# COPR: WezTerm (if development enabled)
-if is_true "$DEVELOPMENT"; then
-    sudo dnf copr enable -y wezfurlong/wezterm-nightly
-fi
-
 # Enable NVIDIA repo if GPU is detected
 # Checks sysfs PCI vendor ID 0x10de natively (doesn't require pciutils pre-installed) or lspci
 NVIDIA_DETECTED=false
+NVIDIA_NEED_REBOOT=false
 if grep -qs "0x10de" /sys/bus/pci/devices/*/vendor 2>/dev/null || \
    (command -v lspci >/dev/null 2>&1 && lspci | grep -iE 'vga|3d|nvidia' | grep -iq 'nvidia'); then
     NVIDIA_DETECTED=true
@@ -239,18 +235,25 @@ PACKAGES=(
 if [[ "$NVIDIA_DETECTED" == "true" ]]; then
     PACKAGES+=(
         akmod-nvidia-open
-        xorg-x11-drv-nvidia-power
         xorg-x11-drv-nvidia-cuda
         xorg-x11-drv-nvidia-libs.i686
         libva-nvidia-driver
         libva-utils
     )
+    # xorg-x11-drv-nvidia-power (nvidia-powerd) is strictly for laptops with Dynamic Boost (Max-Q)
+    if [[ "$(hostnamectl chassis 2>/dev/null)" =~ ^(laptop|convertible|tablet)$ ]]; then
+        PACKAGES+=( xorg-x11-drv-nvidia-power )
+    fi
 fi
 
 # Development packages
 if is_true "$DEVELOPMENT"; then
     PACKAGES+=(
         @development-tools
+        tmux
+        clang
+        clang-devel
+        clang-tools-extra
         fastfetch
         tree
         procs
@@ -259,13 +262,14 @@ if is_true "$DEVELOPMENT"; then
         podman
         podman-machine
         podman-compose
-        wezterm
-        fish
+        kitty
+        zsh
         git
         gh
         neovim
         tree-sitter-cli
         fira-code-fonts
+        btop
     )
 fi
 
@@ -298,6 +302,35 @@ CORE_FLATPAKS=(
     com.brave.Browser
 )
 flatpak install -y --noninteractive flathub "${CORE_FLATPAKS[@]}"
+
+# If NVIDIA GPU is detected, ensure matching Flatpak GL runtimes are installed
+if [[ "$NVIDIA_DETECTED" == "true" ]]; then
+    NVIDIA_VER="$(modinfo -F version nvidia 2>/dev/null || cat /sys/module/nvidia/version 2>/dev/null || rpm -q --qf '%{VERSION}' xorg-x11-drv-nvidia 2>/dev/null || true)"
+    if [[ -n "$NVIDIA_VER" ]]; then
+        NVIDIA_FLATPAK_TAG="${NVIDIA_VER//./-}"
+        for ext in "org.freedesktop.Platform.GL.nvidia-$NVIDIA_FLATPAK_TAG" "org.freedesktop.Platform.GL32.nvidia-$NVIDIA_FLATPAK_TAG"; do
+            if ! flatpak info "$ext" >/dev/null 2>&1; then
+                log "(core) Installing Flatpak NVIDIA GL runtime: $ext"
+                flatpak install -y --noninteractive flathub "$ext" 2>/dev/null || true
+            fi
+        done
+    fi
+fi
+
+# Configure hardware acceleration & Wayland VSync flags for Flatpak Brave
+BRAVE_CONFIG_DIR="$HOME/.var/app/com.brave.Browser/config"
+BRAVE_FLAGS_FILE="$BRAVE_CONFIG_DIR/brave-flags.conf"
+mkdir -p "$BRAVE_CONFIG_DIR"
+if [[ ! -f "$BRAVE_FLAGS_FILE" ]] || ! grep -q "enable-gpu-rasterization" "$BRAVE_FLAGS_FILE" 2>/dev/null; then
+    log "(core) Configuring Brave Wayland & GPU rasterization flags"
+    cat > "$BRAVE_FLAGS_FILE" <<'EOF'
+--ozone-platform-hint=auto
+--ignore-gpu-blocklist
+--enable-gpu-rasterization
+--enable-zero-copy
+--enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoDecoder,CanvasOopRasterization
+EOF
+fi
 
 # Core systemd services
 systemctl --user add-wants niri.service dms
@@ -362,16 +395,39 @@ chmod 700 "$KEYRING_DIR"
 chmod 600 "$KEYRING_FILE"
 chmod 644 "$DEFAULT_FILE"
 
+log "(core) Installing phinger-cursors theme"
+ICONS_DIR="$HOME/.local/share/icons"
+mkdir -p "$ICONS_DIR"
+if [[ ! -d "$ICONS_DIR/phinger-cursors-dark" || ! -d "$ICONS_DIR/phinger-cursors-light" ]]; then
+    wget -cO- https://github.com/phisch/phinger-cursors/releases/latest/download/phinger-cursors-variants.tar.bz2 | tar xfj - -C "$ICONS_DIR"
+fi
+
 # NVIDIA post-install configuration
 if [[ "$NVIDIA_DETECTED" == "true" ]]; then
     log "(core) Configuring NVIDIA power management & kernel modules"
-    sudo systemctl enable nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service
+    for svc in nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service; do
+        if ! systemctl is-enabled "$svc" >/dev/null 2>&1; then
+            sudo systemctl enable "$svc" 2>/dev/null || true
+        fi
+    done
+
+    # Manage nvidia-powerd: only enable on laptops, disable on desktops to avoid errors
+    if [[ "$(hostnamectl chassis 2>/dev/null)" =~ ^(laptop|convertible|tablet)$ ]]; then
+        if ! systemctl is-enabled nvidia-powerd.service >/dev/null 2>&1; then
+            sudo systemctl enable nvidia-powerd.service 2>/dev/null || true
+        fi
+    elif systemctl is-enabled nvidia-powerd.service >/dev/null 2>&1; then
+        sudo systemctl disable --now nvidia-powerd.service 2>/dev/null || true
+    fi
+
     # Protect akmod-nvidia-open from accidental dnf autoremove cleanup (DNF5 & DNF4)
     sudo dnf mark user akmod-nvidia-open 2>/dev/null || sudo dnf mark install akmod-nvidia-open 2>/dev/null || true
 
     # Fix high VRAM usage leak on niri with NVIDIA drivers (official niri recommendation)
-    sudo mkdir -p /etc/nvidia/nvidia-application-profiles-rc.d
-    sudo tee /etc/nvidia/nvidia-application-profiles-rc.d/50-limit-free-buffer-pool-in-wayland-compositors.json >/dev/null <<'JSON'
+    NVIDIA_APP_PROFILE="/etc/nvidia/nvidia-application-profiles-rc.d/50-limit-free-buffer-pool-in-wayland-compositors.json"
+    if [[ ! -f "$NVIDIA_APP_PROFILE" ]]; then
+        sudo mkdir -p "$(dirname "$NVIDIA_APP_PROFILE")"
+        sudo tee "$NVIDIA_APP_PROFILE" >/dev/null <<'JSON'
 {
     "rules": [
         {
@@ -395,8 +451,17 @@ if [[ "$NVIDIA_DETECTED" == "true" ]]; then
     ]
 }
 JSON
+    fi
 
-    sudo akmods --force
+    # Only build kernel modules if they are not already built for the current kernel
+    KERNEL_VER="$(uname -r)"
+    if ! modinfo -k "$KERNEL_VER" nvidia >/dev/null 2>&1 && ! modinfo -k "$KERNEL_VER" nvidia-open >/dev/null 2>&1; then
+        log "(core) Compiling NVIDIA kernel modules for kernel $KERNEL_VER"
+        sudo akmods --kernels "$KERNEL_VER"
+        NVIDIA_NEED_REBOOT=true
+    else
+        log "(core) NVIDIA kernel modules already present for $KERNEL_VER - skipping rebuild"
+    fi
 fi
 
 log "(core) Configuring Bluetooth in initramfs for LUKS unlock"
@@ -431,6 +496,9 @@ if is_true "$DEVELOPMENT"; then
     if ! command -v mise >/dev/null 2>&1; then
         curl https://mise.run | sh
     fi
+
+    ~/.local/bin/mise settings set go.set_gobin false
+    ~/.local/bin/mise set -g GOBIN="$HOME/.local/bin"
 
     log "(development) Installing mise tools & runtimes"
     MISE_PACKAGES=(
@@ -467,6 +535,7 @@ if is_true "$DEVELOPMENT"; then
         bottom
         awscli
         delta
+        atuin
         # TUI
         lazygit
         opencode
@@ -476,18 +545,36 @@ if is_true "$DEVELOPMENT"; then
     ~/.local/bin/mise use --jobs 6 -g "${MISE_PACKAGES[@]}"
 
     log "(development) Configuring SSH keys & GitHub integration"
+    SSH_KEY_GITHUB="$HOME/.ssh/github"
+    SSH_KEY_SKEY="$HOME/.ssh/skey"
+    SSH_KEYS_EXIST=false
+
+    if [[ -f "$SSH_KEY_GITHUB" && -f "$SSH_KEY_SKEY" ]]; then
+        SSH_KEYS_EXIST=true
+        log "(development) Existing SSH keys detected (~/.ssh/github, ~/.ssh/skey) - skipping key creation & prompts"
+    fi
+
+    # Auto-resolve or prompt for GitHub username
     FEDORA_SCRIPT_GITHUB_USER="${FEDORA_SCRIPT_GITHUB_USER:-${FEDORA_SCRIPT_SSH_USERNAME:-}}"
     if [[ -z "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
-        prompt_input "GitHub username: " FEDORA_SCRIPT_GITHUB_USER
+        FEDORA_SCRIPT_GITHUB_USER="$(gh api user -q .login 2>/dev/null || true)"
     fi
-    if [[ -z "${FEDORA_SCRIPT_GIT_NAME:-}" ]]; then
-        prompt_input "Git author name [$FEDORA_SCRIPT_GITHUB_USER]: " FEDORA_SCRIPT_GIT_NAME "$FEDORA_SCRIPT_GITHUB_USER"
-    fi
-    if [[ -z "${FEDORA_SCRIPT_SSH_EMAIL:-}" ]]; then
-        prompt_input "SSH & Git email: " FEDORA_SCRIPT_SSH_EMAIL
-    fi
-    if [[ -z "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
-        prompt_secret "SSH key passphrase (leave empty for none): " FEDORA_SCRIPT_SSH_PASSPHRASE
+
+    if ! $SSH_KEYS_EXIST; then
+        if [[ -z "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
+            prompt_input "GitHub username: " FEDORA_SCRIPT_GITHUB_USER
+        fi
+        if [[ -z "${FEDORA_SCRIPT_GIT_NAME:-}" ]]; then
+            DEFAULT_GIT_NAME="${FEDORA_SCRIPT_GITHUB_USER:-$(git config --global user.name 2>/dev/null || true)}"
+            prompt_input "Git author name [${DEFAULT_GIT_NAME}]: " FEDORA_SCRIPT_GIT_NAME "$DEFAULT_GIT_NAME"
+        fi
+        if [[ -z "${FEDORA_SCRIPT_SSH_EMAIL:-}" ]]; then
+            DEFAULT_SSH_EMAIL="$(git config --global user.email 2>/dev/null || true)"
+            prompt_input "SSH & Git email [${DEFAULT_SSH_EMAIL}]: " FEDORA_SCRIPT_SSH_EMAIL "$DEFAULT_SSH_EMAIL"
+        fi
+        if [[ -z "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
+            prompt_secret "SSH key passphrase (leave empty for none): " FEDORA_SCRIPT_SSH_PASSPHRASE
+        fi
     fi
 
     mkdir -p "$HOME/.ssh"
@@ -514,30 +601,46 @@ Host github.com
 EOF
     fi
 
-    generate_ssh_key() {
-        local key_path="$1"
-        if [[ -f "$key_path" ]]; then
-            echo "Skipping existing key: $key_path"
-            return
-        fi
+    if ! $SSH_KEYS_EXIST; then
+        generate_ssh_key() {
+            local key_path="$1"
+            if [[ -f "$key_path" ]]; then
+                echo "Skipping existing key: $key_path"
+                return
+            fi
 
-        ssh-keygen \
-            -t ed25519 \
-            -f "$key_path" \
-            -C "$FEDORA_SCRIPT_SSH_EMAIL" \
-            -N "$FEDORA_SCRIPT_SSH_PASSPHRASE"
-    }
+            ssh-keygen \
+                -t ed25519 \
+                -f "$key_path" \
+                -C "$FEDORA_SCRIPT_SSH_EMAIL" \
+                -N "$FEDORA_SCRIPT_SSH_PASSPHRASE"
+        }
 
-    generate_ssh_key "$HOME/.ssh/github"
-    generate_ssh_key "$HOME/.ssh/skey"
+        generate_ssh_key "$SSH_KEY_GITHUB"
+        generate_ssh_key "$SSH_KEY_SKEY"
+    fi
+
+    # Ensure public keys exist if private keys are present
+    if [[ -f "$SSH_KEY_GITHUB" && ! -f "$SSH_KEY_GITHUB.pub" ]]; then
+        ssh-keygen -y -f "$SSH_KEY_GITHUB" > "$SSH_KEY_GITHUB.pub"
+    fi
+    if [[ -f "$SSH_KEY_SKEY" && ! -f "$SSH_KEY_SKEY.pub" ]]; then
+        ssh-keygen -y -f "$SSH_KEY_SKEY" > "$SSH_KEY_SKEY.pub"
+    fi
 
     log "(development) Configuring global .gitconfig"
-    git config --global user.name "$FEDORA_SCRIPT_GIT_NAME"
-    git config --global user.email "$FEDORA_SCRIPT_SSH_EMAIL"
-    git config --global gpg.format ssh
-    git config --global user.signingkey "$HOME/.ssh/skey.pub"
-    git config --global commit.gpgsign true
-    git config --global tag.gpgsign true
+    if [[ -n "${FEDORA_SCRIPT_GIT_NAME:-}" ]]; then
+        git config --global user.name "$FEDORA_SCRIPT_GIT_NAME"
+    fi
+    if [[ -n "${FEDORA_SCRIPT_SSH_EMAIL:-}" ]]; then
+        git config --global user.email "$FEDORA_SCRIPT_SSH_EMAIL"
+    fi
+    if [[ -f "$SSH_KEY_SKEY.pub" ]]; then
+        git config --global gpg.format ssh
+        git config --global user.signingkey "$SSH_KEY_SKEY.pub"
+        git config --global commit.gpgsign true
+        git config --global tag.gpgsign true
+    fi
     git config --global core.editor nvim
     git config --global core.pager delta
     git config --global interactive.diffFilter 'delta --color-only'
@@ -559,6 +662,14 @@ EOF
 SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"
 EOF
 
+    is_key_in_agent() {
+        local pubkey="$1"
+        [[ -f "$pubkey" ]] || return 1
+        local fp
+        fp="$(ssh-keygen -lf "$pubkey" 2>/dev/null | awk '{print $2}')"
+        [[ -n "$fp" ]] && ssh-add -l 2>/dev/null | grep -qF "$fp"
+    }
+
     log "(development) Adding keys to SSH Agent (8h lifetime)"
     if [[ -n "${FEDORA_SCRIPT_SSH_PASSPHRASE:-}" ]]; then
         askpass="$(mktemp)"
@@ -567,12 +678,16 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "$FEDORA_SCRIPT_SSH_PASSPHRASE"
 EOF
-        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add -t 8h "$HOME/.ssh/github"
-        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add -t 8h "$HOME/.ssh/skey"
+        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add -t 8h "$SSH_KEY_GITHUB" 2>/dev/null || true
+        SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add -t 8h "$SSH_KEY_SKEY" 2>/dev/null || true
         rm -f "$askpass"
     else
-        ssh-add -t 8h "$HOME/.ssh/github"
-        ssh-add -t 8h "$HOME/.ssh/skey"
+        if ! is_key_in_agent "$SSH_KEY_GITHUB.pub"; then
+            ssh-add -t 8h "$SSH_KEY_GITHUB" 2>/dev/null || true
+        fi
+        if ! is_key_in_agent "$SSH_KEY_SKEY.pub"; then
+            ssh-add -t 8h "$SSH_KEY_SKEY" 2>/dev/null || true
+        fi
     fi
 
     log "(development) Authenticating GitHub CLI"
@@ -588,8 +703,22 @@ EOF
         local title="$2"
         local type="$3"
 
+        if [[ ! -f "$key_path" ]]; then
+            warn "Key file not found: $key_path"
+            return 0
+        fi
+
+        # Check by title
         if gh ssh-key list 2>/dev/null | grep -qF "$title"; then
             echo "Key '$title' already exists on GitHub, skipping."
+            return 0
+        fi
+
+        # Check by key content to avoid duplicate key errors
+        local key_body
+        key_body="$(awk '{print $2}' "$key_path")"
+        if [[ -n "$key_body" ]] && gh ssh-key list 2>/dev/null | grep -qF "$key_body"; then
+            echo "Key from '$key_path' is already registered on GitHub, skipping."
             return 0
         fi
 
@@ -598,13 +727,30 @@ EOF
         fi
     }
 
-    upload_ssh_key "$HOME/.ssh/github.pub" "$HOST_TAG-github" "authentication"
-    upload_ssh_key "$HOME/.ssh/skey.pub" "$HOST_TAG-signing" "signing"
+    upload_ssh_key "$SSH_KEY_GITHUB.pub" "$HOST_TAG-github" "authentication"
+    upload_ssh_key "$SSH_KEY_SKEY.pub" "$HOST_TAG-signing" "signing"
+
+    log "(development) Setting up antidote (zsh plugin manager)"
+    ANTIDOTE_DIR="${ZDOTDIR:-$HOME}/.antidote"
+    if [[ ! -d "$ANTIDOTE_DIR" ]]; then
+        git clone --depth=1 https://github.com/mattmc3/antidote.git "$ANTIDOTE_DIR"
+    fi
 
     log "(development) Cloning dotfiles via chezmoi"
-    if ! ~/.local/bin/mise exec chezmoi@latest -- chezmoi init --apply "git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"; then
-        warn "Failed to clone/apply dotfiles from git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"
-        echo "Verify the repository exists and your SSH key is authorized."
+    if [[ -z "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
+        FEDORA_SCRIPT_GITHUB_USER="$(gh api user -q .login 2>/dev/null || true)"
+    fi
+    if [[ -z "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
+        prompt_input "GitHub username for dotfiles: " FEDORA_SCRIPT_GITHUB_USER
+    fi
+
+    if [[ -n "${FEDORA_SCRIPT_GITHUB_USER:-}" ]]; then
+        if ! ~/.local/bin/mise exec chezmoi@latest -- chezmoi init --apply "git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"; then
+            warn "Failed to clone/apply dotfiles from git@github.com:$FEDORA_SCRIPT_GITHUB_USER/dotfiles.git"
+            echo "Verify the repository exists and your SSH key is authorized."
+        fi
+    else
+        warn "No GitHub username specified; skipping chezmoi dotfiles clone."
     fi
 fi
 
@@ -650,8 +796,11 @@ fi
 
 echo
 echo "================================================================"
-if [[ "$NVIDIA_DETECTED" == "true" ]]; then
-    echo "⚠️  IMPORTANT: NVIDIA drivers installed. Please reboot your system."
+if [[ "$NVIDIA_DETECTED" == "true" ]] && is_true "$NVIDIA_NEED_REBOOT"; then
+    echo "⚠️  IMPORTANT: New NVIDIA kernel drivers built. Please reboot your system."
+    echo "    Command: sudo reboot"
+elif [[ "$NVIDIA_DETECTED" == "true" ]] && ! lsmod | grep -q '^nvidia '; then
+    echo "⚠️  IMPORTANT: NVIDIA driver not yet loaded. Please reboot your system."
     echo "    Command: sudo reboot"
 else
     echo "Restart your shell or log out/in to apply all changes."
